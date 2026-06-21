@@ -1,0 +1,15 @@
+{
+  "name": "landblaze-payment-portal",
+  "version": "2.0.0",
+  "description": "Landblaze Limited payment portal — Vercel deployment",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "create-user": "node scripts/createUser.js"
+  },
+  "dependencies": {
+    "@vercel/kv": "^2.0.0",
+    "axios": "^1.7.0",
+    "bcryptjs": "^2.4.3"
+  }
+}
