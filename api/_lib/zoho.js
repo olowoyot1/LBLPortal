@@ -64,6 +64,45 @@ async function zohoRequest(method, endpoint, { params = {}, data = null } = {}) 
   }
 }
 
+// ── Items ──
+
+export async function searchItems(name) {
+  const data = await zohoRequest('get', '/items', {
+    params: { name_contains: name, filter_by: 'Status.Active', per_page: 10 },
+  });
+  return (data.items || []).map((i) => ({
+    item_id: i.item_id,
+    name: i.name,
+    rate: i.rate,
+    description: i.description || '',
+    unit: i.unit || '',
+  }));
+}
+
+export async function listItems() {
+  const data = await zohoRequest('get', '/items', { params: { per_page: 50, filter_by: 'Status.Active' } });
+  return (data.items || []).map((i) => ({
+    item_id: i.item_id,
+    name: i.name,
+    rate: i.rate,
+    description: i.description || '',
+    unit: i.unit || '',
+  }));
+}
+
+// ── Bank accounts ──
+
+export async function listBankAccounts() {
+  const data = await zohoRequest('get', '/bankaccounts', { params: { filter_by: 'Status.Active' } });
+  return (data.bankaccounts || []).map((b) => ({
+    account_id: b.account_id,
+    account_name: b.account_name,
+    bank_name: b.bank_name || '',
+    account_type: b.account_type || '',
+    account_number: b.account_number || '',
+  }));
+}
+
 // ── Contacts ──
 
 export async function searchContacts(name) {
@@ -79,18 +118,35 @@ export async function searchContacts(name) {
 }
 
 export async function createContact({ name, email, phone, address }) {
+  // Email, phone, and address are mandatory for every new customer — Zoho
+  // needs a valid email on file or the auto-email-on-create step later
+  // (invoice/sales order/receipt) has nothing to send to.
+  const missing = [];
+  if (!name?.trim()) missing.push('name');
+  if (!email?.trim()) missing.push('email');
+  if (!phone?.trim()) missing.push('phone');
+  if (!address?.trim()) missing.push('address');
+  if (missing.length) {
+    throw new Error(`Missing required customer field(s): ${missing.join(', ')}`);
+  }
+
   const payload = {
     contact_name: name,
     contact_type: 'customer',
-    ...(email ? { email } : {}),
-    ...(phone ? { phone } : {}),
-    ...(address ? { billing_address: { address } } : {}),
+    email,
+    phone,
+    billing_address: { address },
   };
   const data = await zohoRequest('post', '/contacts', { data: payload });
   if (!data.contact?.contact_id) {
     throw new Error(`Contact creation did not return a contact_id: ${JSON.stringify(data)}`);
   }
-  return { customer_id: data.contact.contact_id, customer_name: data.contact.contact_name };
+  return {
+    customer_id: data.contact.contact_id,
+    customer_name: data.contact.contact_name,
+    email: data.contact.email,
+    phone: data.contact.phone,
+  };
 }
 
 // ── Sales orders ──
@@ -110,11 +166,14 @@ export async function listOpenSalesOrders(customerId) {
   }));
 }
 
-export async function createSalesOrder({ customerId, date, lineItemName, rate, notes, salesperson }) {
+export async function createSalesOrder({ customerId, date, itemId, lineItemName, rate, notes, salesperson }) {
+  const lineItem = itemId
+    ? { item_id: itemId, rate, quantity: 1 }
+    : { name: lineItemName, rate, quantity: 1 };
   const payload = {
     customer_id: customerId,
     date,
-    line_items: [{ name: lineItemName, rate, quantity: 1 }],
+    line_items: [lineItem],
     notes,
     ...(salesperson ? { salesperson_name: salesperson } : {}),
   };
@@ -128,13 +187,34 @@ export async function createSalesOrder({ customerId, date, lineItemName, rate, n
   };
 }
 
+export async function sendSalesOrderEmail(salesorderId, { email, subject, body } = {}) {
+  // Emails the customer their copy.
+  const payload = {};
+  if (email) payload.to_mail_ids = [email];
+  if (subject) payload.subject = subject;
+  if (body) payload.body = body;
+  await zohoRequest('post', `/salesorders/${salesorderId}/email`, { data: payload });
+}
+
+export async function markSalesOrderOpen(salesorderId) {
+  // Sales orders in Zoho Books use Draft / Open / Void / Closed — there is
+  // no "sent" status for this document type. Emailing usually flips a
+  // draft to Open automatically, but we also call this explicitly so the
+  // order is guaranteed to leave Draft even if the email step is skipped
+  // or fails (e.g. customer has no email on file).
+  await zohoRequest('post', `/salesorders/${salesorderId}/status/open`);
+}
+
 // ── Invoices ──
 
-export async function createInvoice({ customerId, date, lineItemName, rate, notes, salesperson }) {
+export async function createInvoice({ customerId, date, itemId, lineItemName, rate, notes, salesperson }) {
+  const lineItem = itemId
+    ? { item_id: itemId, rate, quantity: 1 }
+    : { name: lineItemName, rate, quantity: 1 };
   const payload = {
     customer_id: customerId,
     date,
-    line_items: [{ name: lineItemName, rate, quantity: 1 }],
+    line_items: [lineItem],
     notes,
     ...(salesperson ? { salesperson_name: salesperson } : {}),
   };
@@ -145,14 +225,32 @@ export async function createInvoice({ customerId, date, lineItemName, rate, note
   return { invoice_id: data.invoice.invoice_id, invoice_number: data.invoice.invoice_number };
 }
 
+export async function sendInvoiceEmail(invoiceId, { email, subject, body } = {}) {
+  // Emails the customer their copy.
+  const payload = {};
+  if (email) payload.to_mail_ids = [email];
+  if (subject) payload.subject = subject;
+  if (body) payload.body = body;
+  await zohoRequest('post', `/invoices/${invoiceId}/email`, { data: payload });
+}
+
+export async function markInvoiceSent(invoiceId) {
+  // Emailing an invoice normally flips it from Draft to Sent automatically,
+  // but we also call this explicitly so the invoice is guaranteed to leave
+  // Draft status even if the email step is skipped or fails (e.g. customer
+  // has no email on file).
+  await zohoRequest('post', `/invoices/${invoiceId}/status/sent`);
+}
+
 // ── Customer payments ──
 
-export async function createCustomerPayment({ customerId, amount, paymentMode, date, referenceNumber, description }) {
+export async function createCustomerPayment({ customerId, amount, paymentMode, accountId, date, referenceNumber, description }) {
   const payload = {
     customer_id: customerId,
     payment_mode: paymentMode,
     amount,
     date,
+    ...(accountId ? { account_id: accountId } : {}),
     ...(referenceNumber ? { reference_number: referenceNumber } : {}),
     description,
   };
@@ -161,6 +259,25 @@ export async function createCustomerPayment({ customerId, amount, paymentMode, d
     throw new Error(`Payment creation did not return a payment_id: ${JSON.stringify(data)}`);
   }
   return { payment_id: data.payment.payment_id, payment_number: data.payment.payment_number };
+}
+
+export async function sendPaymentReceiptEmail(paymentId, { email, subject, body } = {}) {
+  // NOTE: Zoho Books' public v3 API documentation does not list a
+  // dedicated "email a customer payment" endpoint the way it does for
+  // invoices and sales orders (POST /invoices/{id}/email,
+  // POST /salesorders/{id}/email). The web UI supports emailing a payment
+  // receipt from Sales > Payments Received > Email icon, which implies a
+  // server-side action exists, but its exact REST path isn't published in
+  // the docs we could verify. We try the same /email convention used
+  // elsewhere; if your Zoho org rejects this (404), that confirms the
+  // endpoint name differs for your account — in that case this call fails
+  // gracefully (caught by the caller) without blocking the invoice/sales
+  // order email, which IS documented and confirmed to work.
+  const payload = {};
+  if (email) payload.to_mail_ids = [email];
+  if (subject) payload.subject = subject;
+  if (body) payload.body = body;
+  await zohoRequest('post', `/customerpayments/${paymentId}/email`, { data: payload });
 }
 
 // ── Verification ──
