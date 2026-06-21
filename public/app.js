@@ -61,6 +61,7 @@ async function tryResumeSession() {
 function enterApp() {
   el('nav-user').textContent = `${currentUser.displayName} · ${currentUser.role}`;
   el('clear-log-btn').classList.toggle('hidden', currentUser.role === 'realtor');
+  el('tab-staff').classList.toggle('hidden', currentUser.role !== 'admin');
   el('login-screen').style.display = 'none';
   el('app').style.display = 'block';
   renderLog();
@@ -80,11 +81,12 @@ let S = { custType: null, txType: null, customer: null, salesOrder: null, newCus
 
 // ── tabs ──
 function switchTab(t) {
-  ['payment', 'log'].forEach((x) => {
-    el('tab-' + x).classList.toggle('active', x === t);
-    el('view-' + x).classList.toggle('active', x === t);
+  ['payment', 'log', 'staff'].forEach((x) => {
+    el('tab-' + x)?.classList.toggle('active', x === t);
+    el('view-' + x)?.classList.toggle('active', x === t);
   });
   if (t === 'log') renderLog();
+  if (t === 'staff') renderStaff();
 }
 
 // ── steps ──
@@ -392,6 +394,93 @@ async function exportCSV() {
   a.href = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csv);
   a.download = `landblaze_transactions_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
+}
+
+// ── STAFF MANAGEMENT (admin only) ──
+
+async function renderStaff() {
+  el('staff-body').innerHTML = '<div class="log-empty"><span class="spinner"></span>Loading...</div>';
+  try {
+    const users = await api('/api/staff');
+    if (!users.length) {
+      el('staff-body').innerHTML = '<div class="log-empty">No staff accounts found.</div>';
+      return;
+    }
+    const roleColors = { admin: 'tx-outright', manager: 'tx-installment', realtor: 'tx-topup' };
+    el('staff-body').innerHTML = `
+      <table class="log-table">
+        <thead><tr>
+          <th>Username</th><th>Display Name</th><th>Role</th><th>Created</th><th></th>
+        </tr></thead>
+        <tbody>${users.map((u) => `
+          <tr>
+            <td style="font-family:'DM Mono',monospace;font-size:12px">${escapeHtml(u.username)}</td>
+            <td style="font-weight:500">${escapeHtml(u.displayName)}</td>
+            <td><span class="tx-badge ${roleColors[u.role] || ''}">${escapeHtml(u.role)}</span></td>
+            <td style="color:var(--muted);font-size:11px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-NG') : '—'}</td>
+            <td>${u.username !== currentUser.username
+              ? `<button onclick="deleteUser('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--red-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;font-family:'DM Sans',sans-serif">Remove</button>`
+              : '<span style="font-size:11px;color:var(--muted)">You</span>'
+            }</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    el('staff-body').innerHTML = `<div class="log-empty" style="color:var(--red)">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function showCreateUserForm() {
+  ['su-username', 'su-name', 'su-password'].forEach((id) => { el(id).value = ''; });
+  el('su-role').value = 'realtor';
+  el('su-error').classList.add('hidden');
+  el('create-user-card').classList.remove('hidden');
+  el('su-username').focus();
+}
+
+function hideCreateUserForm() {
+  el('create-user-card').classList.add('hidden');
+}
+
+async function submitCreateUser() {
+  const username = el('su-username').value.trim();
+  const displayName = el('su-name').value.trim();
+  const password = el('su-password').value;
+  const role = el('su-role').value;
+
+  el('su-error').classList.add('hidden');
+  if (!username || !displayName || !password) {
+    el('su-error').textContent = 'All fields are required.';
+    el('su-error').classList.remove('hidden');
+    return;
+  }
+  if (password.length < 8) {
+    el('su-error').textContent = 'Password must be at least 8 characters.';
+    el('su-error').classList.remove('hidden');
+    return;
+  }
+
+  const btn = el('su-submit');
+  btn.disabled = true; btn.textContent = 'Creating...';
+  try {
+    await api('/api/staff', { method: 'POST', body: JSON.stringify({ username, displayName, password, role }) });
+    hideCreateUserForm();
+    renderStaff();
+  } catch (e) {
+    el('su-error').textContent = e.message;
+    el('su-error').classList.remove('hidden');
+  }
+  btn.disabled = false; btn.textContent = 'Create Account';
+}
+
+async function deleteUser(username) {
+  if (!confirm(`Remove staff account "${username}"? They will no longer be able to log in.`)) return;
+  try {
+    await api(`/api/staff?username=${encodeURIComponent(username)}`, { method: 'DELETE' });
+    renderStaff();
+  } catch (e) {
+    alert(e.message);
+  }
 }
 
 // ── init ──
