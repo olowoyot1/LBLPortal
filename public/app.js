@@ -77,7 +77,7 @@ async function logout() {
 }
 
 // ── state ──
-let S = { custType: null, txType: null, customer: null, salesOrder: null, newCust: {}, prop: {}, payment: {} };
+let S = { custType: null, txType: null, customer: null, salesOrder: null, newCust: {}, prop: {}, payment: {}, item: null, bankAccount: null };
 
 // ── tabs ──
 function switchTab(t) {
@@ -159,9 +159,18 @@ function selectCustomer(c) {
 function goStep2() {
   if (S.custType === 'new') {
     const name = el('new-name').value.trim();
-    if (!name) { alert('Please enter customer name'); return; }
-    S.newCust = { name, email: el('new-email').value.trim(), phone: el('new-phone').value.trim(), address: el('new-address').value.trim() };
-    S.customer = { customer_name: name, isNew: true };
+    const email = el('new-email').value.trim();
+    const phone = el('new-phone').value.trim();
+    const address = el('new-address').value.trim();
+    const missing = [];
+    if (!name) missing.push('Full Name');
+    if (!email) missing.push('Email');
+    if (!phone) missing.push('Phone');
+    if (!address) missing.push('Address');
+    if (missing.length) { alert(`Please fill in: ${missing.join(', ')}.\n\nEmail, phone, and address are required so we can send the customer their receipt, invoice, or sales order.`); return; }
+    if (!/^\S+@\S+\.\S+$/.test(email)) { alert('Please enter a valid email address.'); return; }
+    S.newCust = { name, email, phone, address };
+    S.customer = { customer_name: name, email, phone, isNew: true };
   }
   if (!S.customer) { alert('Please select or create a customer'); return; }
   S.txType = null; S.salesOrder = null;
@@ -221,6 +230,7 @@ function goStep3() {
   if (!S.txType) { alert('Please select a transaction type'); return; }
   if (S.txType === 'topup' && !S.salesOrder) { alert('Please select a sales order'); return; }
   const isTopup = S.txType === 'topup';
+  S.item = null;
   if (isTopup) {
     hide('prop-desc-row'); show('topup-so-display'); hide('full-price-row');
     el('topup-so-display').className = 'info-box';
@@ -231,9 +241,79 @@ function goStep3() {
     el('full-price-label').textContent = S.txType === 'installment'
       ? 'Full Property Price (NGN) * — for sales order'
       : 'Full Property Price (NGN) *';
+    el('prop-desc').value = '';
+    el('item-results').innerHTML = '';
   }
   el('pay-date').value = new Date().toISOString().split('T')[0];
+  loadBankAccounts();
+  onPayModeChange();
   setStep(3);
+}
+
+// ── ITEM SEARCH (Zoho Books Items) ──
+let itemSearchTimer = null;
+el('prop-desc').addEventListener('input', () => {
+  S.item = null; // typing again invalidates a prior selection
+  clearTimeout(itemSearchTimer);
+  const q = el('prop-desc').value.trim();
+  if (!q) { el('item-results').innerHTML = ''; return; }
+  itemSearchTimer = setTimeout(() => searchItemsForInput(q), 300);
+});
+
+async function searchItemsForInput(q) {
+  el('item-results').innerHTML = '<span style="font-size:12px;color:var(--muted)"><span class="spinner"></span>Searching items...</span>';
+  try {
+    const results = await api(`/api/items?name=${encodeURIComponent(q)}`);
+    if (!results.length) {
+      el('item-results').innerHTML = '<div style="font-size:12px;color:var(--muted);padding:6px 0">No matching item in Zoho Books. You can still type a custom description.</div>';
+    } else {
+      el('item-results').innerHTML = results.map((i) => `
+        <div class="result-item" id="ir-${i.item_id}" data-item='${JSON.stringify(i).replace(/'/g, "&#39;")}' onclick="selectItemFromEl(this)">
+          <div>
+            <div class="r-name">${escapeHtml(i.name)}</div>
+            <div class="r-meta">${fmt(i.rate || 0)}${i.unit ? ' / ' + escapeHtml(i.unit) : ''}</div>
+          </div>
+          <span style="color:var(--muted)">›</span>
+        </div>`).join('');
+    }
+  } catch (e) {
+    el('item-results').innerHTML = `<div style="color:var(--red);font-size:12px">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function selectItemFromEl(node) {
+  const i = JSON.parse(node.getAttribute('data-item'));
+  S.item = i;
+  el('prop-desc').value = i.name;
+  el('item-results').innerHTML = '';
+  if (i.rate && el('full-price') && !el('full-price-row').classList.contains('hidden')) {
+    el('full-price').value = i.rate;
+  }
+}
+
+// ── BANK ACCOUNTS (Zoho Books) ──
+async function loadBankAccounts() {
+  const sel = el('bank-account');
+  sel.innerHTML = '<option value="">Loading bank accounts...</option>';
+  try {
+    const accounts = await api('/api/bank-accounts');
+    if (!accounts.length) {
+      sel.innerHTML = '<option value="">No bank accounts found in Zoho Books</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">Select bank account...</option>' +
+      accounts.map((a) => `<option value='${a.account_id}'>${escapeHtml(a.account_name)}${a.bank_name ? ' — ' + escapeHtml(a.bank_name) : ''}</option>`).join('');
+    sel._accounts = accounts;
+  } catch (e) {
+    sel.innerHTML = `<option value="">Error: ${escapeHtml(e.message)}</option>`;
+  }
+}
+
+function onPayModeChange() {
+  const mode = el('pay-mode').value;
+  // Bank account only meaningfully applies to bank transfer / cheque deposits
+  show('bank-account-row');
+  el('bank-account-row').style.display = (mode === 'cash') ? 'none' : '';
 }
 
 // ── STEP 4 ──
@@ -244,24 +324,36 @@ function goStep4() {
   const isTopup = S.txType === 'topup';
   const propDesc = isTopup ? (S.salesOrder.subject || 'See sales order') : el('prop-desc').value.trim();
   const fullPrice = isTopup ? S.salesOrder.total : parseFloat(el('full-price').value || 0);
-  if (!isTopup && !propDesc) { alert('Please enter property description'); return; }
+  if (!isTopup && !propDesc) { alert('Please enter or select a property/item'); return; }
   if (!isTopup && !fullPrice) { alert('Please enter full property price'); return; }
-  S.payment = { amtPaid: amt, payDate: date, payMode: el('pay-mode').value, payRef: el('pay-ref').value.trim(), salesperson: el('salesperson').value.trim(), notes: el('pay-notes').value.trim() };
+
+  const payMode = el('pay-mode').value;
+  const bankSel = el('bank-account');
+  let bankAccount = null;
+  if (payMode !== 'cash') {
+    if (!bankSel.value) { alert('Please select the bank account this payment was deposited into'); return; }
+    const accounts = bankSel._accounts || [];
+    bankAccount = accounts.find((a) => a.account_id === bankSel.value) || { account_id: bankSel.value };
+  }
+
+  S.payment = { amtPaid: amt, payDate: date, payMode, payRef: el('pay-ref').value.trim(), salesperson: el('salesperson').value.trim(), notes: el('pay-notes').value.trim() };
   S.prop = { propDesc, fullPrice };
+  S.bankAccount = bankAccount;
 
   const custName = S.custType === 'new' ? S.newCust.name : S.customer.customer_name;
+  const custEmail = S.custType === 'new' ? S.newCust.email : S.customer.email;
   const txLabels = { topup: 'Installment Top-up', outright: 'Outright Purchase', installment: 'New Installment' };
-  const docsText = { outright: '① Payment receipt<br>② Invoice (full property price)', installment: '① Payment receipt (initial deposit)<br>② Sales Order (full contract value)', topup: '① Payment receipt only' };
+  const docsText = { outright: '① Payment receipt (emailed)<br>② Invoice (sent &amp; emailed)', installment: '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed)', topup: '① Payment receipt (emailed)' };
 
   el('review-card').innerHTML = `
     <div class="card-title">Review Before Confirming</div>
-    <div class="s-row"><div class="s-icon ok">👤</div><div><div class="s-label">${escapeHtml(custName)}</div><div class="s-sub">${S.custType === 'new' ? 'New customer — will be created' : 'Existing customer · ID: ' + escapeHtml(S.customer.customer_id)}</div></div></div>
+    <div class="s-row"><div class="s-icon ok">👤</div><div><div class="s-label">${escapeHtml(custName)}</div><div class="s-sub">${S.custType === 'new' ? 'New customer — will be created · ' + escapeHtml(custEmail || 'no email') : 'Existing customer · ID: ' + escapeHtml(S.customer.customer_id)}</div></div></div>
     <div class="s-row"><div class="s-icon ok">🏷</div><div><div class="s-label">${txLabels[S.txType]}</div><div class="s-sub">${escapeHtml(propDesc)}</div></div></div>
     ${!isTopup ? `<div class="s-row"><div class="s-icon ok">📊</div><div><div class="s-label">Full property value</div><div class="s-sub">${fmt(fullPrice)}</div></div></div>` : ''}
     ${isTopup ? `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Sales Order: ${escapeHtml(S.salesOrder.salesorder_number)}</div><div class="s-sub">Balance: ${fmt(S.salesOrder.balance_due || S.salesOrder.total)}</div></div></div>` : ''}
-    <div class="s-row"><div class="s-icon ok">💰</div><div><div class="s-label">Amount Paid: ${fmt(amt)}</div><div class="s-sub">${modeLabel(S.payment.payMode)}${S.payment.payRef ? ' · Ref: ' + escapeHtml(S.payment.payRef) : ''} · ${date}</div></div></div>
+    <div class="s-row"><div class="s-icon ok">💰</div><div><div class="s-label">Amount Paid: ${fmt(amt)}</div><div class="s-sub">${modeLabel(S.payment.payMode)}${bankAccount ? ' · ' + escapeHtml(bankAccount.account_name || '') : ''}${S.payment.payRef ? ' · Ref: ' + escapeHtml(S.payment.payRef) : ''} · ${date}</div></div></div>
     ${S.payment.salesperson ? `<div class="s-row"><div class="s-icon ok">👔</div><div><div class="s-label">Realtor</div><div class="s-sub">${escapeHtml(S.payment.salesperson)}</div></div></div>` : ''}
-    <div class="s-row"><div class="s-icon ok">📝</div><div><div class="s-label">Documents to be created</div><div class="s-sub">${docsText[S.txType]}</div></div></div>
+    <div class="s-row"><div class="s-icon ok">📝</div><div><div class="s-label">Documents to be created &amp; sent</div><div class="s-sub">${docsText[S.txType]}</div></div></div>
   `;
   hide('error-box'); setStep(4);
 }
@@ -279,10 +371,12 @@ async function processPayment() {
     newCust: S.newCust,
     salesOrder: S.salesOrder,
     propDesc: S.prop.propDesc,
+    item: S.item,
     fullPrice: S.prop.fullPrice,
     amtPaid: S.payment.amtPaid,
     payDate: S.payment.payDate,
     payMode: S.payment.payMode,
+    bankAccount: S.bankAccount,
     payRef: S.payment.payRef,
     salesperson: S.payment.salesperson,
     notes: S.payment.notes
@@ -292,6 +386,9 @@ async function processPayment() {
     const result = await api('/api/payments/process', { method: 'POST', body: JSON.stringify(payload) });
     const docLabels = { invoice: 'Invoice', sales_order: 'Sales Order', receipt_only: 'Receipt Only' };
     setStep(5);
+    const emailRow = result.emailSent
+      ? `<div class="s-row"><div class="s-icon ok">📧</div><div><div class="s-label">Emailed to customer</div><div class="s-sub">${escapeHtml(result.custEmail || '')}</div></div></div>`
+      : `<div class="s-row"><div class="s-icon" style="background:var(--red-bg)">⚠️</div><div><div class="s-label" style="color:var(--red)">Could not email customer</div><div class="s-sub">${escapeHtml((result.emailErrors || []).join(' · ') || 'No email on file')}</div></div></div>`;
     el('success-content').innerHTML = `
       <div style="text-align:center;padding:1rem 0 1.5rem">
         <div style="font-size:32px;margin-bottom:8px">✅</div>
@@ -299,10 +396,11 @@ async function processPayment() {
         <div style="font-size:11px;color:var(--muted);margin-top:4px">${new Date(result.timestamp).toLocaleString('en-NG')} · ${escapeHtml(result.realtor)}</div>
       </div>
       <div class="s-row"><div class="s-icon ok">👤</div><div><div class="s-label">${escapeHtml(result.custName)}</div><div class="s-sub">${result.custCreated ? 'New customer created · ' : ''}ID: ${escapeHtml(result.custId)}</div></div></div>
-      <div class="s-row"><div class="s-icon ok">🧾</div><div><div class="s-label">Payment receipt recorded &amp; verified</div><div class="s-sub">${fmt(result.amtPaid)} · ${modeLabel(result.payMode)}${result.payRef ? ' · Ref: ' + escapeHtml(result.payRef) : ''}</div><span class="doc-chip">${escapeHtml(result.paymentId)}</span></div></div>
+      <div class="s-row"><div class="s-icon ok">🧾</div><div><div class="s-label">Payment receipt recorded &amp; verified</div><div class="s-sub">${fmt(result.amtPaid)} · ${modeLabel(result.payMode)}${result.bankAccountName ? ' · ' + escapeHtml(result.bankAccountName) : ''}${result.payRef ? ' · Ref: ' + escapeHtml(result.payRef) : ''}</div><span class="doc-chip">${escapeHtml(result.paymentId)}</span></div></div>
       ${result.docType !== 'receipt_only'
-        ? `<div class="s-row"><div class="s-icon ok">📄</div><div><div class="s-label">${docLabels[result.docType]} generated &amp; verified</div>${result.docType === 'sales_order' ? `<div class="s-sub">Full contract: ${fmt(result.fullPrice)}</div>` : ''}<span class="doc-chip">${escapeHtml(result.docNumber || result.docId)}</span></div></div>`
+        ? `<div class="s-row"><div class="s-icon ok">📄</div><div><div class="s-label">${docLabels[result.docType]} sent to customer &amp; verified</div>${result.docType === 'sales_order' ? `<div class="s-sub">Full contract: ${fmt(result.fullPrice)}</div>` : ''}<span class="doc-chip">${escapeHtml(result.docNumber || result.docId)}</span></div></div>`
         : `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Top-up applied to ${escapeHtml(result.soNumber || '')}</div><div class="s-sub">Receipt only — no new document created</div></div></div>`}
+      ${emailRow}
     `;
   } catch (e) {
     el('error-box').className = 'err-box';
@@ -313,12 +411,12 @@ async function processPayment() {
 }
 
 function resetPayment() {
-  S = { custType: null, txType: null, customer: null, salesOrder: null, newCust: {}, prop: {}, payment: {} };
+  S = { custType: null, txType: null, customer: null, salesOrder: null, newCust: {}, prop: {}, payment: {}, item: null, bankAccount: null };
   ['btn-existing', 'btn-new'].forEach((b) => el(b).classList.remove('active'));
   ['btn-topup', 'btn-outright', 'btn-installment'].forEach((b) => el(b).classList.remove('active'));
   hide('existing-search'); hide('new-cust-form'); hide('so-picker');
   el('next1').disabled = true;
-  el('search-name').value = ''; el('search-results').innerHTML = ''; el('so-list').innerHTML = '';
+  el('search-name').value = ''; el('search-results').innerHTML = ''; el('so-list').innerHTML = ''; el('item-results').innerHTML = '';
   ['new-name', 'new-email', 'new-phone', 'new-address', 'prop-desc', 'full-price', 'amount-paid', 'pay-ref', 'salesperson', 'pay-notes'].forEach((id) => { if (el(id)) el(id).value = ''; });
   setStep(1);
 }
@@ -352,7 +450,7 @@ async function renderLog() {
   el('log-body').innerHTML = `
     <table class="log-table">
       <thead><tr>
-        <th>Date</th><th>Customer</th><th>Type</th><th>Amount Paid</th><th>Document</th><th>Realtor</th>
+        <th>Date</th><th>Customer</th><th>Type</th><th>Amount Paid</th><th>Document</th><th>Emailed</th><th>Realtor</th>
       </tr></thead>
       <tbody>${log.map((e) => `
         <tr>
@@ -361,6 +459,7 @@ async function renderLog() {
           <td><span class="tx-badge tx-${e.txType}">${txLabels[e.txType] || e.txType}</span></td>
           <td style="font-family:'DM Mono',monospace;font-size:12px">${fmt(e.amtPaid)}</td>
           <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gold)">${escapeHtml(e.docNumber || e.paymentId || '—')}${e.soNumber ? '<br><span style="color:var(--muted)">SO: ' + escapeHtml(e.soNumber) + '</span>' : ''}</td>
+          <td>${e.emailSent ? '<span style="color:var(--green)">✓ Sent</span>' : '<span style="color:var(--red)" title="' + escapeHtml((e.emailErrors || []).join(' · ')) + '">✗ Failed</span>'}</td>
           <td style="color:var(--muted)">${escapeHtml(e.realtor || '—')}</td>
         </tr>`).join('')}
       </tbody>
@@ -381,13 +480,13 @@ async function exportCSV() {
   let log = [];
   try { log = await api('/api/transactions'); } catch (e) { alert(e.message); return; }
   if (!log.length) { alert('No transactions to export.'); return; }
-  const headers = ['Timestamp', 'Realtor', 'Customer', 'Customer ID', 'New Customer', 'Tx Type', 'Property', 'Amount Paid', 'Full Price', 'Payment Mode', 'Reference', 'Document Type', 'Document Number', 'Payment ID', 'SO Number'];
+  const headers = ['Timestamp', 'Realtor', 'Customer', 'Customer ID', 'Customer Email', 'New Customer', 'Tx Type', 'Property', 'Amount Paid', 'Full Price', 'Payment Mode', 'Bank Account', 'Reference', 'Document Type', 'Document Number', 'Payment ID', 'SO Number', 'Emailed'];
   const rows = log.map((e) => [
     new Date(e.timestamp).toLocaleString('en-NG'),
-    e.realtor, e.custName, e.custId, e.custCreated ? 'Yes' : 'No',
+    e.realtor, e.custName, e.custId, e.custEmail || '', e.custCreated ? 'Yes' : 'No',
     e.txType, e.propDesc || '', e.amtPaid, e.fullPrice || '',
-    modeLabel(e.payMode), e.payRef || '', e.docType || '',
-    e.docNumber || '', e.paymentId || '', e.soNumber || ''
+    modeLabel(e.payMode), e.bankAccountName || '', e.payRef || '', e.docType || '',
+    e.docNumber || '', e.paymentId || '', e.soNumber || '', e.emailSent ? 'Yes' : 'No'
   ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
   const csv = [headers.join(','), ...rows].join('\n');
   const a = document.createElement('a');
