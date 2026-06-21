@@ -21,8 +21,15 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       const { name, email, phone, address } = req.body || {};
-      if (!name?.trim()) return res.status(400).json({ error: 'Customer name is required' });
-      const customer = await createContact({ name: name.trim(), email, phone, address });
+      const missing = [];
+      if (!name?.trim()) missing.push('name');
+      if (!email?.trim()) missing.push('email');
+      if (!phone?.trim()) missing.push('phone');
+      if (!address?.trim()) missing.push('address');
+      if (missing.length) {
+        return res.status(400).json({ error: `Missing required field(s): ${missing.join(', ')}` });
+      }
+      const customer = await createContact({ name: name.trim(), email: email.trim(), phone: phone.trim(), address: address.trim() });
       return res.json(customer);
     }
 
