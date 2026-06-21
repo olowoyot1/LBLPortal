@@ -121,7 +121,7 @@ async function searchCustomer() {
   btn.disabled = true; btn.textContent = '...';
   el('search-results').innerHTML = '<span style="font-size:12px;color:var(--muted)"><span class="spinner"></span>Searching...</span>';
   try {
-    const results = await api(`/api/customers/search?name=${encodeURIComponent(name)}`);
+    const results = await api(`/api/customers?name=${encodeURIComponent(name)}`);
     if (!results.length) {
       el('search-results').innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">No customers found. Try different spelling or create new.</div>';
     } else {
