@@ -325,12 +325,13 @@ a{color:var(--gold);text-decoration:none}
       </div>
       <div class="card hidden" id="new-cust-form">
         <div class="card-title">New Customer Details</div>
-        <div class="form-row"><label>Full Name *</label><input type="text" id="new-name" placeholder="e.g. Abiola Samson Ashimiyu"/></div>
+        <div class="form-row"><label>Full Name *</label><input type="text" id="new-name" placeholder="e.g. Abiola Samson Ashimiyu" required/></div>
         <div class="grid2">
-          <div class="form-row"><label>Email</label><input type="email" id="new-email" placeholder="customer@email.com"/></div>
-          <div class="form-row"><label>Phone</label><input type="text" id="new-phone" placeholder="08012345678"/></div>
+          <div class="form-row"><label>Email *</label><input type="email" id="new-email" placeholder="customer@email.com" required/></div>
+          <div class="form-row"><label>Phone *</label><input type="text" id="new-phone" placeholder="08012345678" required/></div>
         </div>
-        <div class="form-row"><label>Address</label><input type="text" id="new-address" placeholder="Street, City, State"/></div>
+        <div class="form-row"><label>Address *</label><input type="text" id="new-address" placeholder="Street, City, State" required/></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">All fields are required — email and phone are needed to send the customer their receipt, invoice, or sales order.</div>
       </div>
       <div class="action-bar">
         <button class="btn-next" id="next1" onclick="goStep2()" disabled>Continue →</button>
@@ -372,8 +373,9 @@ a{color:var(--gold);text-decoration:none}
       <div class="card">
         <div class="card-title">Property Details</div>
         <div class="form-row" id="prop-desc-row">
-          <label>Property / Item Description *</label>
-          <input type="text" id="prop-desc" placeholder="e.g. 500sqm plot at Lekki Phase 2"/>
+          <label>Property / Item *</label>
+          <input type="text" id="prop-desc" placeholder="Type to search items in Zoho Books..." autocomplete="off"/>
+          <div id="item-results" class="result-list"></div>
         </div>
         <div id="topup-so-display"></div>
         <div class="form-row hidden" id="full-price-row">
@@ -396,7 +398,7 @@ a{color:var(--gold);text-decoration:none}
         <div class="grid2">
           <div class="form-row">
             <label>Payment Mode</label>
-            <select id="pay-mode">
+            <select id="pay-mode" onchange="onPayModeChange()">
               <option value="banktransfer">Bank Transfer</option>
               <option value="cash">Cash</option>
               <option value="creditcard">Credit Card</option>
@@ -408,6 +410,12 @@ a{color:var(--gold);text-decoration:none}
             <label>Reference Number</label>
             <input type="text" id="pay-ref" placeholder="TRF2026001"/>
           </div>
+        </div>
+        <div class="form-row" id="bank-account-row">
+          <label>Deposited Into (Bank Account) *</label>
+          <select id="bank-account">
+            <option value="">Loading bank accounts...</option>
+          </select>
         </div>
         <div class="form-row">
           <label>Realtor / Salesperson</label>
