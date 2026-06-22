@@ -151,6 +151,17 @@ export async function createContact({ name, email, phone, address }) {
 
 // ── Sales orders ──
 
+function extractEmailTemplate(resp, fallbackSubject) {
+  // Zoho's GET .../email response has been observed nesting the template
+  // under different keys depending on doc type/version. Check the common
+  // shapes before giving up and using a safe fallback, since the /email
+  // POST endpoint rejects an empty/missing subject outright.
+  const src = resp?.data || resp?.mail_content || resp || {};
+  const subject = src.subject || src.mail_subject || src.custom_subject || fallbackSubject;
+  const body = src.body || src.mail_body || src.custom_body || '';
+  return { subject, body };
+}
+
 export async function listOpenSalesOrders(customerId) {
   const data = await zohoRequest('get', '/salesorders', {
     params: { customer_id: customerId, status: 'open' },
@@ -187,12 +198,19 @@ export async function createSalesOrder({ customerId, date, itemId, lineItemName,
   };
 }
 
-export async function sendSalesOrderEmail(salesorderId, { email, subject, body } = {}) {
-  // Emails the customer their copy.
-  const payload = {};
+export async function sendSalesOrderEmail(salesorderId, { email, salesorderNumber } = {}) {
+  // Zoho's /email endpoint rejects calls where subject/body are omitted
+  // ("Invalid value passed for Subject") — it does not silently fall back
+  // to a template the way the field docs implied. The reliable approach is
+  // to first GET the pre-filled email content Zoho would use, then POST
+  // that same subject/body back, only overriding the recipient.
+  const template = await zohoRequest('get', `/salesorders/${salesorderId}/email`);
+  const { subject, body } = extractEmailTemplate(
+    template,
+    `Sales Order ${salesorderNumber || salesorderId}`
+  );
+  const payload = { subject, body };
   if (email) payload.to_mail_ids = [email];
-  if (subject) payload.subject = subject;
-  if (body) payload.body = body;
   await zohoRequest('post', `/salesorders/${salesorderId}/email`, { data: payload });
 }
 
@@ -225,12 +243,17 @@ export async function createInvoice({ customerId, date, itemId, lineItemName, ra
   return { invoice_id: data.invoice.invoice_id, invoice_number: data.invoice.invoice_number };
 }
 
-export async function sendInvoiceEmail(invoiceId, { email, subject, body } = {}) {
-  // Emails the customer their copy.
-  const payload = {};
+export async function sendInvoiceEmail(invoiceId, { email, invoiceNumber } = {}) {
+  // Same fix as sales orders: GET the pre-filled email content first, then
+  // POST it back rather than omitting subject/body and hoping for a
+  // server-side default — Zoho's /email endpoint rejects an empty subject.
+  const template = await zohoRequest('get', `/invoices/${invoiceId}/email`);
+  const { subject, body } = extractEmailTemplate(
+    template,
+    `Invoice ${invoiceNumber || invoiceId}`
+  );
+  const payload = { subject, body };
   if (email) payload.to_mail_ids = [email];
-  if (subject) payload.subject = subject;
-  if (body) payload.body = body;
   await zohoRequest('post', `/invoices/${invoiceId}/email`, { data: payload });
 }
 
@@ -261,22 +284,23 @@ export async function createCustomerPayment({ customerId, amount, paymentMode, a
   return { payment_id: data.payment.payment_id, payment_number: data.payment.payment_number };
 }
 
-export async function sendPaymentReceiptEmail(paymentId, { email, subject, body } = {}) {
+export async function sendPaymentReceiptEmail(paymentId, { email, paymentNumber } = {}) {
   // NOTE: Zoho Books' public v3 API documentation does not list a
   // dedicated "email a customer payment" endpoint the way it does for
-  // invoices and sales orders (POST /invoices/{id}/email,
-  // POST /salesorders/{id}/email). The web UI supports emailing a payment
-  // receipt from Sales > Payments Received > Email icon, which implies a
-  // server-side action exists, but its exact REST path isn't published in
-  // the docs we could verify. We try the same /email convention used
-  // elsewhere; if your Zoho org rejects this (404), that confirms the
-  // endpoint name differs for your account — in that case this call fails
-  // gracefully (caught by the caller) without blocking the invoice/sales
-  // order email, which IS documented and confirmed to work.
-  const payload = {};
+  // invoices and sales orders. We use the same GET-then-POST pattern as
+  // those (fetch the pre-filled subject/body, then send it back) since
+  // the same "Invalid value passed for Subject" error showed up here too,
+  // suggesting the endpoint does exist and follows the same contract. If
+  // the GET 404s, that's a clean signal the endpoint genuinely isn't
+  // available for this org/plan, and the caller will record it as a
+  // non-blocking error without affecting the invoice/sales order email.
+  const template = await zohoRequest('get', `/customerpayments/${paymentId}/email`);
+  const { subject, body } = extractEmailTemplate(
+    template,
+    `Payment Receipt ${paymentNumber || paymentId}`
+  );
+  const payload = { subject, body };
   if (email) payload.to_mail_ids = [email];
-  if (subject) payload.subject = subject;
-  if (body) payload.body = body;
   await zohoRequest('post', `/customerpayments/${paymentId}/email`, { data: payload });
 }
 
