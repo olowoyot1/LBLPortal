@@ -111,7 +111,7 @@ a{color:var(--gold);text-decoration:none}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
 /* SEGMENT BUTTONS */
-.seg{display:grid;gap:8px}
+.seg{display:grid;gap:8px}.seg-2col{grid-template-columns:1fr 1fr}
 .seg-btn{
   background:#0f0f0f;border:0.5px solid #252525;border-radius:8px;
   padding:10px 14px;font-size:13px;color:#777;cursor:pointer;
@@ -243,6 +243,64 @@ a{color:var(--gold);text-decoration:none}
 .tx-installment{background:#1a1a0a;color:#c9a86c}
 .tx-topup{background:#0a1a0a;color:#6fcf97}
 .log-card{background:var(--surface);border:0.5px solid var(--border);border-radius:14px;overflow:hidden}
+
+/* ── RESPONSIVE ── */
+@media (max-width: 600px) {
+  .nav {
+    padding: 0 1rem;
+    height: auto;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+  .nav-title { display: none; }
+  .nav-tabs { order: 3; width: 100%; justify-content: center; }
+  .nav-tab { flex: 1; text-align: center; font-size: 12px; padding: 6px 8px; }
+  .nav-user { display: none; }
+  .logout-btn { font-size: 11px; padding: 4px 8px; }
+
+  .view { padding: 1rem 0.75rem; }
+
+  .steps { margin-bottom: 1.25rem; }
+  .sl { display: none; }
+  .step-line { margin: 0 2px; }
+
+  .card { padding: 1.1rem 1rem; }
+
+  .grid2 { grid-template-columns: 1fr; gap: 0; }
+
+  .seg-2col { grid-template-columns: 1fr !important; }
+  .seg { gap: 6px; }
+
+  .action-bar { gap: 8px; }
+  .btn-back { flex: 1; padding: 11px; font-size: 12px; }
+  .btn-next { flex: 2; padding: 11px; font-size: 12px; }
+
+  .log-stats { grid-template-columns: repeat(2, 1fr); }
+  .log-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .log-actions { width: 100%; display: flex; justify-content: flex-end; }
+
+  .log-table { font-size: 11px; }
+  .log-table th, .log-table td { padding: 8px 6px; }
+
+  /* Hide less important log columns on mobile */
+  .log-table .col-mode,
+  .log-table .col-ref,
+  .log-table .col-doc { display: none; }
+
+  .search-row { flex-direction: column; }
+  .search-btn { width: 100%; }
+
+  .s-label { font-size: 12px; }
+  .s-sub { font-size: 10px; }
+}
+
+@media (max-width: 380px) {
+  .nav-tab { font-size: 11px; padding: 5px 4px; }
+  .log-stats { grid-template-columns: 1fr 1fr; }
+  .stat-value { font-size: 15px; }
+}
 </style>
 </head>
 <body>
@@ -304,7 +362,7 @@ a{color:var(--gold);text-decoration:none}
     <div id="step1">
       <div class="card">
         <div class="card-title">Is this a new or existing customer?</div>
-        <div class="seg" style="grid-template-columns:1fr 1fr">
+        <div class="seg seg-2col">
           <button class="seg-btn" id="btn-existing" onclick="setCustType('existing')">
             <span class="sb-icon">🔍</span>
             <div><div class="sb-text">Existing customer</div><div class="sb-sub">Search Zoho Books</div></div>
