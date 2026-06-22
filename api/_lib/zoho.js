@@ -166,11 +166,16 @@ export async function listOpenSalesOrders(customerId) {
   const data = await zohoRequest('get', '/salesorders', {
     params: { customer_id: customerId, status: 'open' },
   });
+  // NOTE: Zoho sales orders do not carry a real running "balance" field —
+  // that only exists on invoices. We deliberately do NOT fall back to
+  // o.balance ?? o.total here, since that previously masked a bug where
+  // balance always equaled total. The real remaining balance is computed
+  // in process.js from our own transaction log (sum of payments already
+  // recorded against this sales order).
   return (data.salesorders || []).map((o) => ({
     salesorder_id: o.salesorder_id,
     salesorder_number: o.salesorder_number,
     total: o.total,
-    balance_due: o.balance ?? o.total,
     status: o.status,
     date: o.date,
     subject: o.reference_number || o.salesorder_number,
