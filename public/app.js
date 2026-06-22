@@ -203,7 +203,7 @@ async function loadOpenSalesOrders() {
         <div class="result-item" id="so-${o.salesorder_id}" data-so='${JSON.stringify(o).replace(/'/g, "&#39;")}' onclick="selectSOFromEl(this)">
           <div>
             <div class="r-name">${escapeHtml(o.salesorder_number)}${o.subject ? ' · ' + escapeHtml(o.subject) : ''}</div>
-            <div class="r-meta">Total: ${fmt(o.total)} · Balance: ${fmt(o.balance_due || o.total)} · ${o.date}</div>
+            <div class="r-meta">Total: ${fmt(o.total)} · Paid: ${fmt(o.paid_so_far ?? 0)} · Balance: ${fmt(o.balance_due ?? o.total)} · ${o.date}</div>
           </div>
           <span class="badge badge-open">${escapeHtml(o.status || 'open')}</span>
         </div>`).join('');
@@ -234,7 +234,7 @@ function goStep3() {
   if (isTopup) {
     hide('prop-desc-row'); show('topup-so-display'); hide('full-price-row');
     el('topup-so-display').className = 'info-box';
-    el('topup-so-display').innerHTML = `<strong>Sales Order:</strong> ${escapeHtml(S.salesOrder.salesorder_number)}<br><strong>Property:</strong> ${escapeHtml(S.salesOrder.subject || 'See sales order')}<br><strong>Total Contract:</strong> ${fmt(S.salesOrder.total)}<br><strong>Remaining Balance:</strong> ${fmt(S.salesOrder.balance_due || S.salesOrder.total)}`;
+    el('topup-so-display').innerHTML = `<strong>Sales Order:</strong> ${escapeHtml(S.salesOrder.salesorder_number)}<br><strong>Property:</strong> ${escapeHtml(S.salesOrder.subject || 'See sales order')}<br><strong>Total Contract:</strong> ${fmt(S.salesOrder.total)}<br><strong>Paid So Far:</strong> ${fmt(S.salesOrder.paid_so_far ?? 0)}<br><strong>Remaining Balance:</strong> ${fmt(S.salesOrder.balance_due ?? S.salesOrder.total)}`;
     el('topup-so-display').style.marginBottom = '0';
   } else {
     show('prop-desc-row'); el('topup-so-display').innerHTML = ''; show('full-price-row');
@@ -350,7 +350,7 @@ function goStep4() {
     <div class="s-row"><div class="s-icon ok">👤</div><div><div class="s-label">${escapeHtml(custName)}</div><div class="s-sub">${S.custType === 'new' ? 'New customer — will be created · ' + escapeHtml(custEmail || 'no email') : 'Existing customer · ID: ' + escapeHtml(S.customer.customer_id)}</div></div></div>
     <div class="s-row"><div class="s-icon ok">🏷</div><div><div class="s-label">${txLabels[S.txType]}</div><div class="s-sub">${escapeHtml(propDesc)}</div></div></div>
     ${!isTopup ? `<div class="s-row"><div class="s-icon ok">📊</div><div><div class="s-label">Full property value</div><div class="s-sub">${fmt(fullPrice)}</div></div></div>` : ''}
-    ${isTopup ? `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Sales Order: ${escapeHtml(S.salesOrder.salesorder_number)}</div><div class="s-sub">Balance: ${fmt(S.salesOrder.balance_due || S.salesOrder.total)}</div></div></div>` : ''}
+    ${isTopup ? `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Sales Order: ${escapeHtml(S.salesOrder.salesorder_number)}</div><div class="s-sub">Balance before this payment: ${fmt(S.salesOrder.balance_due ?? S.salesOrder.total)}</div></div></div>` : ''}
     <div class="s-row"><div class="s-icon ok">💰</div><div><div class="s-label">Amount Paid: ${fmt(amt)}</div><div class="s-sub">${modeLabel(S.payment.payMode)}${bankAccount ? ' · ' + escapeHtml(bankAccount.account_name || '') : ''}${S.payment.payRef ? ' · Ref: ' + escapeHtml(S.payment.payRef) : ''} · ${date}</div></div></div>
     ${S.payment.salesperson ? `<div class="s-row"><div class="s-icon ok">👔</div><div><div class="s-label">Realtor</div><div class="s-sub">${escapeHtml(S.payment.salesperson)}</div></div></div>` : ''}
     <div class="s-row"><div class="s-icon ok">📝</div><div><div class="s-label">Documents to be created &amp; sent</div><div class="s-sub">${docsText[S.txType]}</div></div></div>
@@ -399,7 +399,7 @@ async function processPayment() {
       <div class="s-row"><div class="s-icon ok">🧾</div><div><div class="s-label">Payment receipt recorded &amp; verified</div><div class="s-sub">${fmt(result.amtPaid)} · ${modeLabel(result.payMode)}${result.bankAccountName ? ' · ' + escapeHtml(result.bankAccountName) : ''}${result.payRef ? ' · Ref: ' + escapeHtml(result.payRef) : ''}</div><span class="doc-chip">${escapeHtml(result.paymentId)}</span></div></div>
       ${result.docType !== 'receipt_only'
         ? `<div class="s-row"><div class="s-icon ok">📄</div><div><div class="s-label">${docLabels[result.docType]} sent to customer &amp; verified</div>${result.docType === 'sales_order' ? `<div class="s-sub">Full contract: ${fmt(result.fullPrice)}</div>` : ''}<span class="doc-chip">${escapeHtml(result.docNumber || result.docId)}</span></div></div>`
-        : `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Top-up applied to ${escapeHtml(result.soNumber || '')}</div><div class="s-sub">Receipt only — no new document created</div></div></div>`}
+        : `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Top-up applied to ${escapeHtml(result.soNumber || '')}</div><div class="s-sub">Remaining balance: ${fmt(result.soRemainingBalance ?? 0)}</div></div></div>`}
       ${emailRow}
     `;
   } catch (e) {
