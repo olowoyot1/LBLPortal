@@ -92,7 +92,7 @@ export default async function handler(req, res) {
       // status in Zoho Books. Done independently so a failed email
       // doesn't leave the invoice stuck in Draft.
       try {
-        await zoho.sendInvoiceEmail(invoice.invoice_id, { email: customerEmail });
+        await zoho.sendInvoiceEmail(invoice.invoice_id, { email: customerEmail, invoiceNumber: invoice.invoice_number });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Invoice email: ${e.message}`);
@@ -117,7 +117,7 @@ export default async function handler(req, res) {
       // in Zoho Books (not "sent"). Done independently so a failed email
       // doesn't leave the order stuck in Draft.
       try {
-        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail });
+        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, salesorderNumber: so.salesorder_number });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Sales order email: ${e.message}`);
@@ -138,7 +138,7 @@ export default async function handler(req, res) {
     // Every transaction — receipt-only top-ups included — emails the
     // customer their payment receipt.
     try {
-      await zoho.sendPaymentReceiptEmail(payment.payment_id, { email: customerEmail });
+      await zoho.sendPaymentReceiptEmail(payment.payment_id, { email: customerEmail, paymentNumber: payment.payment_number });
       emailSent = true;
     } catch (e) {
       emailErrors.push(`Receipt email: ${e.message}`);
