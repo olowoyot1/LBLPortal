@@ -134,7 +134,6 @@ export default async function handler(req, res) {
       }
       docNumber = salesOrder.salesorder_number;
     }
-
     // Every transaction — receipt-only top-ups included — emails the
     // customer their payment receipt.
     try {
@@ -171,10 +170,23 @@ export default async function handler(req, res) {
     };
 
     const transactions = await getTransactions();
+
+    // For top-ups, compute the new remaining balance on the sales order
+    // (Zoho doesn't track this field itself — see listOpenSalesOrders).
+    // This sums every prior transaction tied to this sales order plus the
+    // payment we just recorded.
+    let soRemainingBalance = null;
+    if (txType === 'topup') {
+      const priorPaid = transactions
+        .filter((t) => t.docId === salesOrder.salesorder_id || t.soNumber === salesOrder.salesorder_number)
+        .reduce((sum, t) => sum + (Number(t.amtPaid) || 0), 0);
+      soRemainingBalance = Math.max(0, Number(salesOrder.total) - priorPaid - Number(amtPaid));
+    }
+
     transactions.unshift(entry);
     await saveTransactions(transactions);
 
-    res.json({ success: true, ...entry });
+    res.json({ success: true, ...entry, soRemainingBalance });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Internal server error' });
