@@ -130,12 +130,27 @@ export async function createContact({ name, email, phone, address }) {
     throw new Error(`Missing required customer field(s): ${missing.join(', ')}`);
   }
 
+  // Zoho Books requires email AND phone to be set on a contact_person entry.
+  // The top-level fields alone are not reliably picked up for email sending.
+  // Zoho uses "mobile" (not "phone") inside contact_persons for the mobile
+  // number — setting both "phone" and "mobile" ensures the number is saved
+  // regardless of which field Zoho prefers for the org's plan/region.
   const payload = {
     contact_name: name,
     contact_type: 'customer',
     email,
     phone,
+    mobile: phone,
     billing_address: { address },
+    contact_persons: [
+      {
+        first_name: name,
+        email,
+        phone,
+        mobile: phone,
+        is_primary_contact: true,
+      },
+    ],
   };
   const data = await zohoRequest('post', '/contacts', { data: payload });
   if (!data.contact?.contact_id) {
@@ -144,8 +159,9 @@ export async function createContact({ name, email, phone, address }) {
   return {
     customer_id: data.contact.contact_id,
     customer_name: data.contact.contact_name,
-    email: data.contact.email,
-    phone: data.contact.phone,
+    // Fall back to input email if Zoho does not echo it back
+    email: data.contact.email || email,
+    phone: data.contact.phone || phone,
   };
 }
 
