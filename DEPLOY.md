@@ -80,3 +80,14 @@ curl -X POST https://accounts.zoho.com/oauth/v2/token \
 ```
 
 The `refresh_token` in the response is what goes in your Vercel env vars. It does not expire unless revoked.
+
+---
+
+## What's new: customized contracts, payment history, and bank filtering
+
+- **Customized Contract of Sale**: every outright purchase or new installment plan now generates a PDF Contract of Sale (mirroring Landblaze's standard template) filled in with the customer's name, address, the property, and the agreed price. It's attached directly to the invoice/sales order in Zoho Books and goes out as a real email attachment alongside the existing invoice/sales-order email — no separate email service needed. New dependency: `pdfkit`.
+- **Resend Contract**: the transaction log has a "Resend" button (outright/installment rows only) that regenerates the contract from the stored transaction and re-sends it — useful if the original send failed or customer details were corrected afterward. Endpoint: `POST /api/contracts/resend`.
+- **Payment history in top-up emails**: every top-up receipt email now includes a styled HTML table of every payment made against that sales order (including the new one), with a running balance after each entry and a total-paid/remaining-balance summary row.
+- **Bank account dropdown filtered**: `GET /api/bank-accounts` now only returns Providus Bank, Zenith Bank, and Titan Bank — the org's other ~17 internal bookkeeping accounts (Allocation, Commission, Petty Cash, Providus USD, Undeposited Funds, etc.) are filtered out. No env var needed; the allowed list is in `api/_lib/zoho.js` (`ALLOWED_BANK_NAMES`) if it ever needs to change.
+
+No new environment variables are required for any of this — only two new npm dependencies (`pdfkit`, `form-data`), already in `package.json`.
