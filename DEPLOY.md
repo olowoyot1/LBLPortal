@@ -1,17 +1,5 @@
 # Landblaze Payment Portal — Vercel Deployment Guide
 
-## Changelog — this update
-
-Fixes applied in this round:
-
-- **Items not appearing**: added `/api/items` (backed by Zoho's `GET /items` with `name_contains`) and live autocomplete on the Property/Item field.
-- **Bank accounts not appearing**: added `/api/bank-accounts` (backed by `GET /bankaccounts`) and a "Deposited Into" dropdown, wired into the customer payment's `account_id`.
-- **Invoices/Sales Orders stuck in Draft**: after creation, the app now calls Zoho's `POST /invoices/{id}/email` (which also flips status to Sent) and, as a defensive backup, `POST /invoices/{id}/status/sent` directly. Sales orders use the equivalent `POST /salesorders/{id}/email` plus `POST /salesorders/{id}/status/open` (sales orders use Draft/Open/Closed/Void, not "Sent").
-- **New customer fields**: email, phone, and address are now required in the UI and validated server-side in `/api/customers` and `/api/payments/process`.
-- **Email automation**: invoices and sales orders are now emailed to the customer automatically. **One caveat:** Zoho Books' public API does not document a dedicated endpoint for emailing a *customer payment* receipt (only invoices and sales orders have documented `/email` endpoints). The code attempts `POST /customerpayments/{id}/email` as a best guess following the same pattern, but if your Zoho org returns a 404/error for this call, it will be logged as a non-blocking `emailErrors` entry — the invoice/sales order email (which is documented and reliable) still goes through. If receipt emails consistently fail, contact Zoho support to confirm the right endpoint, or have your team manually email receipts from Sales → Payments Received → Email icon for now.
-
----
-
 ## What changed from the original
 
 | Original | Vercel version |
@@ -92,3 +80,14 @@ curl -X POST https://accounts.zoho.com/oauth/v2/token \
 ```
 
 The `refresh_token` in the response is what goes in your Vercel env vars. It does not expire unless revoked.
+
+---
+
+## What's new: customized contracts, payment history, and bank filtering
+
+- **Customized Contract of Sale**: every outright purchase or new installment plan now generates a PDF Contract of Sale (mirroring Landblaze's standard template) filled in with the customer's name, address, the property, and the agreed price. It's attached directly to the invoice/sales order in Zoho Books and goes out as a real email attachment alongside the existing invoice/sales-order email — no separate email service needed. New dependency: `pdfkit`.
+- **Resend Contract**: the transaction log has a "Resend" button (outright/installment rows only) that regenerates the contract from the stored transaction and re-sends it — useful if the original send failed or customer details were corrected afterward. Endpoint: `POST /api/contracts/resend`.
+- **Payment history in top-up emails**: every top-up receipt email now includes a styled HTML table of every payment made against that sales order (including the new one), with a running balance after each entry and a total-paid/remaining-balance summary row.
+- **Bank account dropdown filtered**: `GET /api/bank-accounts` now only returns Providus Bank, Zenith Bank, and Titan Bank — the org's other ~17 internal bookkeeping accounts (Allocation, Commission, Petty Cash, Providus USD, Undeposited Funds, etc.) are filtered out. No env var needed; the allowed list is in `api/_lib/zoho.js` (`ALLOWED_BANK_NAMES`) if it ever needs to change.
+
+No new environment variables are required for any of this — only two new npm dependencies (`pdfkit`, `form-data`), already in `package.json`.
