@@ -1,6 +1,5 @@
 // api/_lib/zoho.js
 import axios from 'axios';
-import FormData from 'form-data';
 import { getZohoToken, saveZohoToken } from './db.js';
 
 const ACCOUNTS_BASE = process.env.ZOHO_ACCOUNTS_BASE || 'https://accounts.zoho.com';
@@ -65,31 +64,6 @@ async function zohoRequest(method, endpoint, { params = {}, data = null } = {}) 
   }
 }
 
-// Multipart variant — used for file uploads (e.g. attaching a generated
-// contract PDF) where the body must be sent as multipart/form-data instead
-// of JSON.
-async function zohoUpload(endpoint, formData, { params = {} } = {}) {
-  const token = await getAccessToken();
-  try {
-    const resp = await axios({
-      method: 'post',
-      url: `${API_BASE}${endpoint}`,
-      params: { organization_id: ORG_ID, ...params },
-      data: formData,
-      headers: {
-        Authorization: `Zoho-oauthtoken ${token}`,
-        ...formData.getHeaders(),
-      },
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-    });
-    return resp.data;
-  } catch (err) {
-    const zohoMsg = err.response?.data?.message;
-    throw new Error(`Zoho upload error [${endpoint}]: ${zohoMsg || err.message}`);
-  }
-}
-
 // ── Items ──
 
 export async function searchItems(name) {
@@ -118,26 +92,15 @@ export async function listItems() {
 
 // ── Bank accounts ──
 
-// Landblaze only wants these three operating banks shown in the "Deposited
-// To" dropdown — the org's Zoho Books has ~17 other bank/cash accounts
-// (Allocation, Commission, Electricity, Petty Cash, Undeposited Funds,
-// Providus USD, etc.) used internally or in other currencies that should
-// never appear here. Matched by exact (case-insensitive) account name
-// rather than a loose substring match, so a lookalike like "Providus USD"
-// is correctly excluded while "Providus Bank" is kept.
-const ALLOWED_BANK_NAMES = ['providus bank', 'zenith bank', 'titan bank'];
-
 export async function listBankAccounts() {
   const data = await zohoRequest('get', '/bankaccounts', { params: { filter_by: 'Status.Active' } });
-  return (data.bankaccounts || [])
-    .filter((b) => ALLOWED_BANK_NAMES.includes((b.account_name || '').trim().toLowerCase()))
-    .map((b) => ({
-      account_id: b.account_id,
-      account_name: b.account_name,
-      bank_name: b.bank_name || '',
-      account_type: b.account_type || '',
-      account_number: b.account_number || '',
-    }));
+  return (data.bankaccounts || []).map((b) => ({
+    account_id: b.account_id,
+    account_name: b.account_name,
+    bank_name: b.bank_name || '',
+    account_type: b.account_type || '',
+    account_number: b.account_number || '',
+  }));
 }
 
 // ── Contacts ──
@@ -152,23 +115,6 @@ export async function searchContacts(name) {
     email: c.email,
     phone: c.phone,
   }));
-}
-
-// Used by the contract generator to pull an existing customer's billing
-// address — searchContacts() above is a lightweight list view and doesn't
-// include it, but the full contact record does.
-export async function getContact(customerId) {
-  const data = await zohoRequest('get', `/contacts/${customerId}`);
-  const c = data.contact || {};
-  const addr = c.billing_address || {};
-  const addressLine = [addr.address, addr.city, addr.state, addr.country].filter(Boolean).join(', ');
-  return {
-    customer_id: c.contact_id,
-    customer_name: c.contact_name,
-    email: c.email,
-    phone: c.phone,
-    address: addressLine,
-  };
 }
 
 export async function createContact({ name, email, phone, address }) {
@@ -217,27 +163,6 @@ export async function createContact({ name, email, phone, address }) {
     email: data.contact.email || email,
     phone: data.contact.phone || phone,
   };
-}
-
-// ── Attachments ──
-// Generic helper to attach a generated file (e.g. the customized Contract
-// of Sale PDF) to a sales order or invoice in Zoho Books, so it rides along
-// as a real attachment when the document is emailed (send_attachment=true).
-async function attachFileToDocument(docType, docId, fileBuffer, fileName) {
-  const form = new FormData();
-  form.append('attachment', fileBuffer, { filename: fileName, contentType: 'application/pdf' });
-  // can_send_in_mail tells Zoho to include this attachment when the
-  // document's /email endpoint is called with send_attachment=true.
-  form.append('can_send_in_mail', 'true');
-  await zohoUpload(`/${docType}/${docId}/attachment`, form);
-}
-
-export async function attachContractToSalesOrder(salesorderId, pdfBuffer, fileName = 'Contract_of_Sale.pdf') {
-  await attachFileToDocument('salesorders', salesorderId, pdfBuffer, fileName);
-}
-
-export async function attachContractToInvoice(invoiceId, pdfBuffer, fileName = 'Contract_of_Sale.pdf') {
-  await attachFileToDocument('invoices', invoiceId, pdfBuffer, fileName);
 }
 
 // ── Sales orders ──
@@ -294,7 +219,7 @@ export async function createSalesOrder({ customerId, date, itemId, lineItemName,
   };
 }
 
-export async function sendSalesOrderEmail(salesorderId, { email, salesorderNumber, sendAttachment = false } = {}) {
+export async function sendSalesOrderEmail(salesorderId, { email, salesorderNumber } = {}) {
   // Zoho's /email endpoint rejects calls where subject/body are omitted
   // ("Invalid value passed for Subject") — it does not silently fall back
   // to a template the way the field docs implied. The reliable approach is
@@ -307,7 +232,6 @@ export async function sendSalesOrderEmail(salesorderId, { email, salesorderNumbe
   );
   const payload = { subject, body };
   if (email) payload.to_mail_ids = [email];
-  if (sendAttachment) payload.send_attachment = true;
   await zohoRequest('post', `/salesorders/${salesorderId}/email`, { data: payload });
 }
 
@@ -340,7 +264,7 @@ export async function createInvoice({ customerId, date, itemId, lineItemName, ra
   return { invoice_id: data.invoice.invoice_id, invoice_number: data.invoice.invoice_number };
 }
 
-export async function sendInvoiceEmail(invoiceId, { email, invoiceNumber, sendAttachment = false } = {}) {
+export async function sendInvoiceEmail(invoiceId, { email, invoiceNumber } = {}) {
   // Same fix as sales orders: GET the pre-filled email content first, then
   // POST it back rather than omitting subject/body and hoping for a
   // server-side default — Zoho's /email endpoint rejects an empty subject.
@@ -351,7 +275,6 @@ export async function sendInvoiceEmail(invoiceId, { email, invoiceNumber, sendAt
   );
   const payload = { subject, body };
   if (email) payload.to_mail_ids = [email];
-  if (sendAttachment) payload.send_attachment = true;
   await zohoRequest('post', `/invoices/${invoiceId}/email`, { data: payload });
 }
 
@@ -382,7 +305,7 @@ export async function createCustomerPayment({ customerId, amount, paymentMode, a
   return { payment_id: data.payment.payment_id, payment_number: data.payment.payment_number };
 }
 
-export async function sendPaymentReceiptEmail(paymentId, { email, paymentNumber, extraBodyHtml } = {}) {
+export async function sendPaymentReceiptEmail(paymentId, { email, paymentNumber } = {}) {
   // NOTE: Zoho Books' public v3 API documentation does not list a
   // dedicated "email a customer payment" endpoint the way it does for
   // invoices and sales orders. We use the same GET-then-POST pattern as
@@ -397,11 +320,7 @@ export async function sendPaymentReceiptEmail(paymentId, { email, paymentNumber,
     template,
     `Payment Receipt ${paymentNumber || paymentId}`
   );
-  // For top-ups, we append a styled payment-history table after Zoho's
-  // own receipt body so the customer sees their full running balance
-  // without us having to rebuild the whole receipt template ourselves.
-  const finalBody = extraBodyHtml ? `${body}${extraBodyHtml}` : body;
-  const payload = { subject, body: finalBody };
+  const payload = { subject, body };
   if (email) payload.to_mail_ids = [email];
   await zohoRequest('post', `/customerpayments/${paymentId}/email`, { data: payload });
 }

@@ -4,8 +4,6 @@ import { handleCors } from '../_lib/cors.js';
 import { requireAuth } from '../_lib/auth.js';
 import { getTransactions, saveTransactions } from '../_lib/db.js';
 import * as zoho from '../_lib/zoho.js';
-import { buildContractPdf } from '../_lib/contract.js';
-import { buildPaymentHistoryTable } from '../_lib/paymentHistory.js';
 
 export default async function handler(req, res) {
   if (handleCors(req, res)) return;
@@ -26,7 +24,7 @@ export default async function handler(req, res) {
     }
 
     // Step 1: resolve customer
-    let customerId, customerName, customerEmail, customerAddress = '', customerCreated = false;
+    let customerId, customerName, customerEmail, customerCreated = false;
     if (custType === 'new') {
       const missing = [];
       if (!newCust?.name?.trim()) missing.push('name');
@@ -45,7 +43,6 @@ export default async function handler(req, res) {
       customerId = created.customer_id;
       customerName = created.customer_name;
       customerEmail = created.email;
-      customerAddress = newCust.address.trim();
       customerCreated = true;
     } else {
       if (!customer?.customer_id) {
@@ -54,15 +51,6 @@ export default async function handler(req, res) {
       customerId = customer.customer_id;
       customerName = customer.customer_name;
       customerEmail = customer.email;
-      // Existing-customer search results don't carry a billing address —
-      // fetch it for the contract PDF. Non-fatal if it fails; the contract
-      // will just omit the address line rather than block the payment.
-      try {
-        const full = await zoho.getContact(customerId);
-        customerAddress = full.address || '';
-      } catch (e) {
-        customerAddress = '';
-      }
     }
 
     // Step 2: create payment receipt
@@ -99,26 +87,12 @@ export default async function handler(req, res) {
       if (!verified) throw new Error('Invoice was created but could not be verified. Check Zoho Books directly.');
       docType = 'invoice'; docId = invoice.invoice_id; docNumber = invoice.invoice_number;
 
-      // Generate the customized Contract of Sale and attach it to the
-      // invoice so it goes out as a real attachment on the same email —
-      // non-blocking: a contract failure shouldn't stop the sale itself.
-      try {
-        const contractPdf = await buildContractPdf({
-          customerName, customerAddress, propertyDescription: itemLabel,
-          fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
-          contractDate: payDate, documentNumber: invoice.invoice_number,
-        });
-        await zoho.attachContractToInvoice(invoice.invoice_id, contractPdf);
-      } catch (e) {
-        emailErrors.push(`Contract generation: ${e.message}`);
-      }
-
       // Send the invoice to the customer (emails their copy) and
       // explicitly mark it as sent — this is what moves it out of draft
       // status in Zoho Books. Done independently so a failed email
       // doesn't leave the invoice stuck in Draft.
       try {
-        await zoho.sendInvoiceEmail(invoice.invoice_id, { email: customerEmail, invoiceNumber: invoice.invoice_number, sendAttachment: true });
+        await zoho.sendInvoiceEmail(invoice.invoice_id, { email: customerEmail, invoiceNumber: invoice.invoice_number });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Invoice email: ${e.message}`);
@@ -138,25 +112,12 @@ export default async function handler(req, res) {
       if (!verified) throw new Error('Sales order was created but could not be verified. Check Zoho Books directly.');
       docType = 'sales_order'; docId = so.salesorder_id; docNumber = so.salesorder_number;
 
-      // Same as outright: generate and attach the customized contract,
-      // non-blocking on failure.
-      try {
-        const contractPdf = await buildContractPdf({
-          customerName, customerAddress, propertyDescription: itemLabel,
-          fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
-          contractDate: payDate, documentNumber: so.salesorder_number,
-        });
-        await zoho.attachContractToSalesOrder(so.salesorder_id, contractPdf);
-      } catch (e) {
-        emailErrors.push(`Contract generation: ${e.message}`);
-      }
-
       // Send the sales order to the customer (emails their copy) and
       // explicitly mark it as Open — sales orders use Draft/Open/Closed/Void
       // in Zoho Books (not "sent"). Done independently so a failed email
       // doesn't leave the order stuck in Draft.
       try {
-        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, salesorderNumber: so.salesorder_number, sendAttachment: true });
+        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, salesorderNumber: so.salesorder_number });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Sales order email: ${e.message}`);
@@ -173,42 +134,10 @@ export default async function handler(req, res) {
       }
       docNumber = salesOrder.salesorder_number;
     }
-    // Fetch the transaction log now (needed below both to compute the
-    // top-up running balance for the receipt email, and to append this
-    // entry once processing completes).
-    const transactions = await getTransactions();
-
-    // For top-ups, find every prior transaction tied to this sales order so
-    // we can build the payment-history table embedded in the receipt email,
-    // and compute the new remaining balance (Zoho doesn't track a running
-    // balance on sales orders itself — see listOpenSalesOrders).
-    let soRemainingBalance = null;
-    let paymentHistoryHtml = null;
-    if (txType === 'topup') {
-      const priorPayments = transactions.filter(
-        (t) => t.docId === salesOrder.salesorder_id || t.soNumber === salesOrder.salesorder_number
-      );
-      const priorPaid = priorPayments.reduce((sum, t) => sum + (Number(t.amtPaid) || 0), 0);
-      soRemainingBalance = Math.max(0, Number(salesOrder.total) - priorPaid - Number(amtPaid));
-
-      const { html } = buildPaymentHistoryTable({
-        priorPayments,
-        newPayment: { date: payDate, amount: Number(amtPaid), mode: payMode, ref: payRef },
-        contractTotal: Number(salesOrder.total),
-        soNumber: salesOrder.salesorder_number,
-      });
-      paymentHistoryHtml = html;
-    }
-
     // Every transaction — receipt-only top-ups included — emails the
-    // customer their payment receipt. Top-ups additionally get the full
-    // payment-history table embedded in the email body.
+    // customer their payment receipt.
     try {
-      await zoho.sendPaymentReceiptEmail(payment.payment_id, {
-        email: customerEmail,
-        paymentNumber: payment.payment_number,
-        extraBodyHtml: paymentHistoryHtml,
-      });
+      await zoho.sendPaymentReceiptEmail(payment.payment_id, { email: customerEmail, paymentNumber: payment.payment_number });
       emailSent = true;
     } catch (e) {
       emailErrors.push(`Receipt email: ${e.message}`);
@@ -239,6 +168,20 @@ export default async function handler(req, res) {
       emailSent,
       emailErrors,
     };
+
+    const transactions = await getTransactions();
+
+    // For top-ups, compute the new remaining balance on the sales order
+    // (Zoho doesn't track this field itself — see listOpenSalesOrders).
+    // This sums every prior transaction tied to this sales order plus the
+    // payment we just recorded.
+    let soRemainingBalance = null;
+    if (txType === 'topup') {
+      const priorPaid = transactions
+        .filter((t) => t.docId === salesOrder.salesorder_id || t.soNumber === salesOrder.salesorder_number)
+        .reduce((sum, t) => sum + (Number(t.amtPaid) || 0), 0);
+      soRemainingBalance = Math.max(0, Number(salesOrder.total) - priorPaid - Number(amtPaid));
+    }
 
     transactions.unshift(entry);
     await saveTransactions(transactions);

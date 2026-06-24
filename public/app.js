@@ -450,7 +450,7 @@ async function renderLog() {
   el('log-body').innerHTML = `
     <table class="log-table">
       <thead><tr>
-        <th>Date</th><th>Customer</th><th>Type</th><th>Amount Paid</th><th>Document</th><th>Emailed</th><th>Realtor</th><th>Contract</th>
+        <th>Date</th><th>Customer</th><th>Type</th><th>Amount Paid</th><th>Document</th><th>Emailed</th><th>Realtor</th>
       </tr></thead>
       <tbody>${log.map((e) => `
         <tr>
@@ -461,28 +461,9 @@ async function renderLog() {
           <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gold)">${escapeHtml(e.docNumber || e.paymentId || '—')}${e.soNumber ? '<br><span style="color:var(--muted)">SO: ' + escapeHtml(e.soNumber) + '</span>' : ''}</td>
           <td>${e.emailSent ? '<span style="color:var(--green)">✓ Sent</span>' : '<span style="color:var(--red)" title="' + escapeHtml((e.emailErrors || []).join(' · ')) + '">✗ Failed</span>'}</td>
           <td style="color:var(--muted)">${escapeHtml(e.realtor || '—')}</td>
-          <td>${(e.docType === 'invoice' || e.docType === 'sales_order')
-            ? `<button class="btn-link" style="font-size:11px" onclick="resendContract('${e.id}', this)">Resend</button>`
-            : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
         </tr>`).join('')}
       </tbody>
     </table>`;
-}
-
-async function resendContract(transactionId, btn) {
-  const originalText = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>';
-  try {
-    const result = await api('/api/contracts/resend', { method: 'POST', body: JSON.stringify({ transactionId }) });
-    btn.innerHTML = '✓ Sent';
-    btn.title = `Resent to ${result.custEmail}`;
-    setTimeout(() => { btn.innerHTML = originalText; btn.disabled = false; }, 3000);
-  } catch (e) {
-    alert(`Could not resend contract: ${e.message}`);
-    btn.innerHTML = originalText;
-    btn.disabled = false;
-  }
 }
 
 async function clearLog() {
