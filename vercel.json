@@ -1,7 +1,13 @@
 {
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/public/$1" }
+    { "source": "/api/bank-accounts", "destination": "/api/zoho-data/bank-accounts" },
+    { "source": "/api/customers", "destination": "/api/zoho-data/customers" },
+    { "source": "/api/items", "destination": "/api/zoho-data/items" },
+    { "source": "/api/sales-orders", "destination": "/api/zoho-data/sales-orders" },
+    { "source": "/api/setup", "destination": "/api/staff/setup" },
+    { "source": "/api/health", "destination": "/api/staff/health" },
+    { "source": "/api/staff", "destination": "/api/staff/manage" },
+    { "source": "/((?!api/).*)", "destination": "/public/$1" }
   ],
   "headers": [
     {
