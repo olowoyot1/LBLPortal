@@ -39,3 +39,10 @@ export async function getZohoToken() {
 export async function saveZohoToken(token) {
   await kv.set('zoho_token', token);
 }
+
+// Atomic-ish counter for sequential contract reference codes (LBL-YYYY-NNNN).
+// kv.incr is a true atomic Redis INCR, so concurrent payments never collide
+// on the same number even under simultaneous requests.
+export async function nextContractSequence() {
+  return kv.incr('contract_code_seq');
+}

@@ -21,6 +21,7 @@ export async function createSession(user) {
     username: user.username,
     displayName: user.displayName,
     role: user.role,
+    email: user.email || '',
     createdAt: Date.now(),
     expiresAt: Date.now() + SESSION_TTL_MS,
   };

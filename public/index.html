@@ -246,7 +246,35 @@ a{color:var(--gold);text-decoration:none}
 .log-table td{padding:10px 10px;border-bottom:0.5px solid #131313;color:var(--text);vertical-align:top}
 .log-table tr:last-child td{border-bottom:none}
 .log-table tr:hover td{background:#0f0f0f}
+.log-row{cursor:pointer}
+.log-row:focus{outline:none}
+.log-row:focus td{background:#0f0f0f}
 .tx-badge{font-size:10px;padding:2px 7px;border-radius:99px;font-weight:500}
+
+/* TRANSACTION DETAIL MODAL */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,0.6);
+  display:flex;align-items:center;justify-content:center;
+  z-index:100;padding:1rem;
+}
+.modal-card{
+  background:var(--surface);border:0.5px solid var(--border2);border-radius:14px;
+  padding:1.75rem;max-width:520px;width:100%;max-height:85vh;overflow-y:auto;
+  position:relative;
+}
+.modal-close{
+  position:absolute;top:14px;right:16px;font-size:22px;line-height:1;
+  color:var(--muted);cursor:pointer;width:28px;height:28px;
+  display:flex;align-items:center;justify-content:center;border-radius:6px;
+}
+.modal-close:hover{background:var(--surface2);color:var(--text)}
+.detail-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:1.25rem;padding-right:24px}
+.detail-title{font-size:16px;font-weight:500}
+.detail-sub{font-size:12px;color:var(--muted);margin-top:2px}
+.detail-row{display:flex;justify-content:space-between;gap:1rem;padding:9px 0;border-bottom:0.5px solid #131313;font-size:13px}
+.detail-row:last-of-type{border-bottom:none}
+.detail-label{color:var(--muted);flex-shrink:0}
+.detail-value{text-align:right;font-weight:500}
 .tx-outright{background:#0a1a2e;color:#5b9bd5}
 .tx-installment{background:#1a1a0a;color:#c9a86c}
 .tx-topup{background:#0a1a0a;color:#6fcf97}
@@ -443,6 +471,10 @@ a{color:var(--gold);text-decoration:none}
           <input type="text" id="prop-desc" placeholder="Type to search items in Zoho Books..." autocomplete="off"/>
           <div id="item-results" class="result-list"></div>
         </div>
+        <div class="form-row" id="plot-size-row">
+          <label>Plot Size</label>
+          <input type="text" id="plot-size" placeholder="e.g. 3000 square meters"/>
+        </div>
         <div id="topup-so-display"></div>
         <div class="form-row hidden" id="full-price-row">
           <label id="full-price-label">Full Property Price (NGN) *</label>
@@ -531,6 +563,14 @@ a{color:var(--gold);text-decoration:none}
     </div>
   </div>
 
+  <!-- TRANSACTION DETAIL MODAL -->
+  <div class="modal-overlay hidden" id="tx-detail-modal" onclick="if(event.target===this) closeTxDetail()">
+    <div class="modal-card">
+      <div class="modal-close" onclick="closeTxDetail()">&times;</div>
+      <div id="tx-detail-body"></div>
+    </div>
+  </div>
+
   <!-- STAFF VIEW -->
   <div class="view" id="view-staff">
     <div class="log-header">
@@ -546,14 +586,15 @@ a{color:var(--gold);text-decoration:none}
         <div class="form-row"><label>Display Name *</label><input type="text" id="su-name" placeholder="e.g. Amaka Obi"/></div>
       </div>
       <div class="grid2">
+        <div class="form-row"><label>Email *</label><input type="email" id="su-email" placeholder="e.g. amaka@landblaze.com"/></div>
         <div class="form-row"><label>Password * (min 8 chars)</label><input type="password" id="su-password" placeholder="••••••••"/></div>
-        <div class="form-row"><label>Role</label>
-          <select id="su-role">
-            <option value="realtor">Realtor</option>
-            <option value="manager">Manager</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
+      </div>
+      <div class="form-row"><label>Role</label>
+        <select id="su-role">
+          <option value="realtor">Realtor</option>
+          <option value="manager">Manager</option>
+          <option value="admin">Admin</option>
+        </select>
       </div>
       <div id="su-error" class="hidden" style="color:var(--red);font-size:12px;margin-bottom:0.5rem"></div>
       <div class="action-bar" style="margin-top:0.5rem">

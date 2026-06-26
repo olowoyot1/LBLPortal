@@ -232,16 +232,17 @@ function goStep3() {
   const isTopup = S.txType === 'topup';
   S.item = null;
   if (isTopup) {
-    hide('prop-desc-row'); show('topup-so-display'); hide('full-price-row');
+    hide('prop-desc-row'); hide('plot-size-row'); show('topup-so-display'); hide('full-price-row');
     el('topup-so-display').className = 'info-box';
     el('topup-so-display').innerHTML = `<strong>Sales Order:</strong> ${escapeHtml(S.salesOrder.salesorder_number)}<br><strong>Property:</strong> ${escapeHtml(S.salesOrder.subject || 'See sales order')}<br><strong>Total Contract:</strong> ${fmt(S.salesOrder.total)}<br><strong>Paid So Far:</strong> ${fmt(S.salesOrder.paid_so_far ?? 0)}<br><strong>Remaining Balance:</strong> ${fmt(S.salesOrder.balance_due ?? S.salesOrder.total)}`;
     el('topup-so-display').style.marginBottom = '0';
   } else {
-    show('prop-desc-row'); el('topup-so-display').innerHTML = ''; show('full-price-row');
+    show('prop-desc-row'); show('plot-size-row'); el('topup-so-display').innerHTML = ''; show('full-price-row');
     el('full-price-label').textContent = S.txType === 'installment'
       ? 'Full Property Price (NGN) * — for sales order'
       : 'Full Property Price (NGN) *';
     el('prop-desc').value = '';
+    el('plot-size').value = '';
     el('item-results').innerHTML = '';
   }
   el('pay-date').value = new Date().toISOString().split('T')[0];
@@ -323,6 +324,7 @@ function goStep4() {
   if (!amt || !date) { alert('Please fill in amount and payment date'); return; }
   const isTopup = S.txType === 'topup';
   const propDesc = isTopup ? (S.salesOrder.subject || 'See sales order') : el('prop-desc').value.trim();
+  const plotSize = isTopup ? '' : el('plot-size').value.trim();
   const fullPrice = isTopup ? S.salesOrder.total : parseFloat(el('full-price').value || 0);
   if (!isTopup && !propDesc) { alert('Please enter or select a property/item'); return; }
   if (!isTopup && !fullPrice) { alert('Please enter full property price'); return; }
@@ -337,7 +339,7 @@ function goStep4() {
   }
 
   S.payment = { amtPaid: amt, payDate: date, payMode, payRef: el('pay-ref').value.trim(), salesperson: el('salesperson').value.trim(), notes: el('pay-notes').value.trim() };
-  S.prop = { propDesc, fullPrice };
+  S.prop = { propDesc, plotSize, fullPrice };
   S.bankAccount = bankAccount;
 
   const custName = S.custType === 'new' ? S.newCust.name : S.customer.customer_name;
@@ -348,7 +350,7 @@ function goStep4() {
   el('review-card').innerHTML = `
     <div class="card-title">Review Before Confirming</div>
     <div class="s-row"><div class="s-icon ok">👤</div><div><div class="s-label">${escapeHtml(custName)}</div><div class="s-sub">${S.custType === 'new' ? 'New customer — will be created · ' + escapeHtml(custEmail || 'no email') : 'Existing customer · ID: ' + escapeHtml(S.customer.customer_id)}</div></div></div>
-    <div class="s-row"><div class="s-icon ok">🏷</div><div><div class="s-label">${txLabels[S.txType]}</div><div class="s-sub">${escapeHtml(propDesc)}</div></div></div>
+    <div class="s-row"><div class="s-icon ok">🏷</div><div><div class="s-label">${txLabels[S.txType]}</div><div class="s-sub">${escapeHtml(propDesc)}${plotSize ? ' · ' + escapeHtml(plotSize) : ''}</div></div></div>
     ${!isTopup ? `<div class="s-row"><div class="s-icon ok">📊</div><div><div class="s-label">Full property value</div><div class="s-sub">${fmt(fullPrice)}</div></div></div>` : ''}
     ${isTopup ? `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Sales Order: ${escapeHtml(S.salesOrder.salesorder_number)}</div><div class="s-sub">Balance before this payment: ${fmt(S.salesOrder.balance_due ?? S.salesOrder.total)}</div></div></div>` : ''}
     <div class="s-row"><div class="s-icon ok">💰</div><div><div class="s-label">Amount Paid: ${fmt(amt)}</div><div class="s-sub">${modeLabel(S.payment.payMode)}${bankAccount ? ' · ' + escapeHtml(bankAccount.account_name || '') : ''}${S.payment.payRef ? ' · Ref: ' + escapeHtml(S.payment.payRef) : ''} · ${date}</div></div></div>
@@ -371,6 +373,7 @@ async function processPayment() {
     newCust: S.newCust,
     salesOrder: S.salesOrder,
     propDesc: S.prop.propDesc,
+    plotSize: S.prop.plotSize,
     item: S.item,
     fullPrice: S.prop.fullPrice,
     amtPaid: S.payment.amtPaid,
@@ -417,11 +420,13 @@ function resetPayment() {
   hide('existing-search'); hide('new-cust-form'); hide('so-picker');
   el('next1').disabled = true;
   el('search-name').value = ''; el('search-results').innerHTML = ''; el('so-list').innerHTML = ''; el('item-results').innerHTML = '';
-  ['new-name', 'new-email', 'new-phone', 'new-address', 'prop-desc', 'full-price', 'amount-paid', 'pay-ref', 'salesperson', 'pay-notes'].forEach((id) => { if (el(id)) el(id).value = ''; });
+  ['new-name', 'new-email', 'new-phone', 'new-address', 'prop-desc', 'plot-size', 'full-price', 'amount-paid', 'pay-ref', 'salesperson', 'pay-notes'].forEach((id) => { if (el(id)) el(id).value = ''; });
   setStep(1);
 }
 
 // ── LOG (server-backed, not localStorage) ──
+let logCache = [];
+
 async function renderLog() {
   el('log-body').innerHTML = '<div class="log-empty"><span class="spinner"></span>Loading...</div>';
   let log = [];
@@ -431,6 +436,7 @@ async function renderLog() {
     el('log-body').innerHTML = `<div class="log-empty" style="color:var(--red)">${escapeHtml(e.message)}</div>`;
     return;
   }
+  logCache = log;
 
   const totalAmt = log.reduce((s, e) => s + e.amtPaid, 0);
   const byType = (t) => log.filter((e) => e.txType === t).length;
@@ -450,10 +456,10 @@ async function renderLog() {
   el('log-body').innerHTML = `
     <table class="log-table">
       <thead><tr>
-        <th>Date</th><th>Customer</th><th>Type</th><th>Amount Paid</th><th>Document</th><th>Emailed</th><th>Realtor</th><th>Contract</th>
+        <th>Date</th><th>Customer</th><th>Type</th><th>Amount Paid</th><th>Document</th><th>Emailed</th><th>Realtor</th>
       </tr></thead>
       <tbody>${log.map((e) => `
-        <tr>
+        <tr class="log-row" onclick="openTxDetail('${e.id}')" tabindex="0" title="Click to view full details">
           <td style="white-space:nowrap;color:var(--muted)">${new Date(e.timestamp).toLocaleDateString('en-NG')}</td>
           <td><div style="font-weight:500">${escapeHtml(e.custName)}</div>${e.custCreated ? '<div style="font-size:10px;color:var(--gold)">New</div>' : ''}</td>
           <td><span class="tx-badge tx-${e.txType}">${txLabels[e.txType] || e.txType}</span></td>
@@ -461,23 +467,70 @@ async function renderLog() {
           <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gold)">${escapeHtml(e.docNumber || e.paymentId || '—')}${e.soNumber ? '<br><span style="color:var(--muted)">SO: ' + escapeHtml(e.soNumber) + '</span>' : ''}</td>
           <td>${e.emailSent ? '<span style="color:var(--green)">✓ Sent</span>' : '<span style="color:var(--red)" title="' + escapeHtml((e.emailErrors || []).join(' · ')) + '">✗ Failed</span>'}</td>
           <td style="color:var(--muted)">${escapeHtml(e.realtor || '—')}</td>
-          <td>${(e.docType === 'invoice' || e.docType === 'sales_order')
-            ? `<button class="btn-link" style="font-size:11px" onclick="resendContract('${e.id}', this)">Resend</button>`
-            : '<span style="color:var(--muted);font-size:11px">—</span>'}</td>
         </tr>`).join('')}
       </tbody>
     </table>`;
 }
 
-async function resendContract(transactionId, btn) {
+// ── TRANSACTION DETAIL MODAL ──
+function openTxDetail(transactionId) {
+  const tx = logCache.find((t) => t.id === transactionId);
+  if (!tx) return;
+
+  const txLabels = { topup: 'Top-up', outright: 'Outright Purchase', installment: 'New Installment' };
+  const docLabels = { invoice: 'Invoice', sales_order: 'Sales Order', receipt_only: 'Receipt Only' };
+  const canResend = tx.docType === 'invoice' || tx.docType === 'sales_order';
+
+  const row = (label, value) => value
+    ? `<div class="detail-row"><div class="detail-label">${escapeHtml(label)}</div><div class="detail-value">${value}</div></div>`
+    : '';
+
+  el('tx-detail-body').innerHTML = `
+    <div class="detail-header">
+      <div>
+        <div class="detail-title">${escapeHtml(tx.custName)}</div>
+        <div class="detail-sub">${txLabels[tx.txType] || tx.txType} · ${new Date(tx.timestamp).toLocaleString('en-NG')}</div>
+      </div>
+      <span class="tx-badge tx-${tx.txType}">${txLabels[tx.txType] || tx.txType}</span>
+    </div>
+    ${row('Customer Email', tx.custEmail ? escapeHtml(tx.custEmail) : '<span style="color:var(--muted)">No email on file</span>')}
+    ${row('Property / Item', escapeHtml(tx.propDesc || '—') + (tx.plotSize ? ' · ' + escapeHtml(tx.plotSize) : ''))}
+    ${row('Amount Paid', fmt(tx.amtPaid))}
+    ${tx.fullPrice ? row('Full Price', fmt(tx.fullPrice)) : ''}
+    ${row('Payment Mode', modeLabel(tx.payMode) + (tx.bankAccountName ? ' · ' + escapeHtml(tx.bankAccountName) : ''))}
+    ${row('Payment Reference', tx.payRef ? escapeHtml(tx.payRef) : '')}
+    ${row('Document', (docLabels[tx.docType] || tx.docType) + ': ' + escapeHtml(tx.docNumber || tx.paymentId || '—'))}
+    ${tx.soNumber ? row('Linked Sales Order', escapeHtml(tx.soNumber)) : ''}
+    ${row('Contract Code', tx.contractCode ? `<span style="font-family:'DM Mono',monospace">${escapeHtml(tx.contractCode)}</span>` : '<span style="color:var(--muted)">Not generated</span>')}
+    ${row('Realtor', escapeHtml(tx.realtor || '—') + (tx.realtorEmail ? ' · ' + escapeHtml(tx.realtorEmail) : ''))}
+    ${row('Customer Emailed', tx.emailSent
+      ? '<span style="color:var(--green)">✓ Sent</span>'
+      : '<span style="color:var(--red)">✗ Failed' + ((tx.emailErrors || []).length ? ' — ' + escapeHtml(tx.emailErrors.join(' · ')) : '') + '</span>')}
+    ${row('New Customer', tx.custCreated ? '<span style="color:var(--gold)">Yes — created during this transaction</span>' : '')}
+
+    <div id="tx-detail-resend-area" style="margin-top:1.25rem">
+      ${canResend
+        ? `<button class="log-btn gold" id="tx-detail-resend-btn" onclick="resendContractFromModal('${tx.id}')" style="width:100%;justify-content:center;display:flex;align-items:center;gap:6px">Resend Contract &amp; Document</button>`
+        : '<div style="font-size:12px;color:var(--muted);text-align:center">Top-ups don\u2019t carry their own contract — see the original installment/outright transaction.</div>'
+      }
+    </div>
+  `;
+  el('tx-detail-modal').classList.remove('hidden');
+}
+
+function closeTxDetail() {
+  el('tx-detail-modal').classList.add('hidden');
+}
+
+async function resendContractFromModal(transactionId) {
+  const btn = el('tx-detail-resend-btn');
   const originalText = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span>';
+  btn.innerHTML = '<span class="spinner"></span> Resending...';
   try {
     const result = await api('/api/contracts/resend', { method: 'POST', body: JSON.stringify({ transactionId }) });
-    btn.innerHTML = '✓ Sent';
-    btn.title = `Resent to ${result.custEmail}`;
-    setTimeout(() => { btn.innerHTML = originalText; btn.disabled = false; }, 3000);
+    btn.innerHTML = `✓ Resent to ${escapeHtml(result.custEmail || '')}`;
+    setTimeout(() => { btn.innerHTML = originalText; btn.disabled = false; }, 3500);
   } catch (e) {
     alert(`Could not resend contract: ${e.message}`);
     btn.innerHTML = originalText;
@@ -528,12 +581,13 @@ async function renderStaff() {
     el('staff-body').innerHTML = `
       <table class="log-table">
         <thead><tr>
-          <th>Username</th><th>Display Name</th><th>Role</th><th>Created</th><th></th>
+          <th>Username</th><th>Display Name</th><th>Email</th><th>Role</th><th>Created</th><th></th>
         </tr></thead>
         <tbody>${users.map((u) => `
           <tr>
             <td style="font-family:'DM Mono',monospace;font-size:12px">${escapeHtml(u.username)}</td>
             <td style="font-weight:500">${escapeHtml(u.displayName)}</td>
+            <td style="color:var(--muted);font-size:12px">${escapeHtml(u.email || '—')}</td>
             <td><span class="tx-badge ${roleColors[u.role] || ''}">${escapeHtml(u.role)}</span></td>
             <td style="color:var(--muted);font-size:11px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-NG') : '—'}</td>
             <td>${u.username !== currentUser.username
@@ -549,7 +603,7 @@ async function renderStaff() {
 }
 
 function showCreateUserForm() {
-  ['su-username', 'su-name', 'su-password'].forEach((id) => { el(id).value = ''; });
+  ['su-username', 'su-name', 'su-email', 'su-password'].forEach((id) => { el(id).value = ''; });
   el('su-role').value = 'realtor';
   el('su-error').classList.add('hidden');
   el('create-user-card').classList.remove('hidden');
@@ -563,12 +617,18 @@ function hideCreateUserForm() {
 async function submitCreateUser() {
   const username = el('su-username').value.trim();
   const displayName = el('su-name').value.trim();
+  const email = el('su-email').value.trim();
   const password = el('su-password').value;
   const role = el('su-role').value;
 
   el('su-error').classList.add('hidden');
-  if (!username || !displayName || !password) {
+  if (!username || !displayName || !email || !password) {
     el('su-error').textContent = 'All fields are required.';
+    el('su-error').classList.remove('hidden');
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    el('su-error').textContent = 'Please enter a valid email address.';
     el('su-error').classList.remove('hidden');
     return;
   }
@@ -581,7 +641,7 @@ async function submitCreateUser() {
   const btn = el('su-submit');
   btn.disabled = true; btn.textContent = 'Creating...';
   try {
-    await api('/api/staff', { method: 'POST', body: JSON.stringify({ username, displayName, password, role }) });
+    await api('/api/staff', { method: 'POST', body: JSON.stringify({ username, displayName, email, password, role }) });
     hideCreateUserForm();
     renderStaff();
   } catch (e) {

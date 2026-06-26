@@ -19,6 +19,11 @@ import { handleCors } from '../_lib/cors.js';
 import { requireAuth } from '../_lib/auth.js';
 import { getUsers, saveUsers } from '../_lib/db.js';
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function isValidEmail(e) {
+  return typeof e === 'string' && EMAIL_RE.test(e.trim());
+}
+
 async function manage(req, res) {
   const session = await requireAuth(req, res);
   if (!session) return;
@@ -33,16 +38,20 @@ async function manage(req, res) {
   }
 
   if (req.method === 'POST') {
-    const { username, displayName, password, role } = req.body || {};
+    const { username, displayName, password, role, email } = req.body || {};
 
-    if (!username || !displayName || !password) {
-      return res.status(400).json({ error: 'Username, display name, and password are required.' });
+    if (!username || !displayName || !password || !email) {
+      return res.status(400).json({ error: 'Username, display name, email, and password are required.' });
+    }
+    if (!isValidEmail(email)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
     }
     if (password.length < 8) {
       return res.status(400).json({ error: 'Password must be at least 8 characters.' });
     }
 
     const cleanUsername = username.trim().toLowerCase();
+    const cleanEmail = email.trim().toLowerCase();
     const cleanRole = ['realtor', 'manager', 'admin'].includes(role) ? role : 'realtor';
 
     const users = await getUsers();
@@ -55,6 +64,7 @@ async function manage(req, res) {
       id: `u_${Date.now()}`,
       username: cleanUsername,
       displayName: displayName.trim(),
+      email: cleanEmail,
       role: cleanRole,
       passwordHash,
       createdAt: new Date().toISOString(),
@@ -99,18 +109,22 @@ async function setup(req, res) {
     });
   }
 
-  const { secret, username, password, name, role } = req.query;
+  const { secret, username, password, name, role, email } = req.query;
 
   if (secret !== setupSecret) {
     return res.status(401).json({ error: 'Invalid setup secret.' });
   }
 
-  if (!username || !password || !name) {
+  if (!username || !password || !name || !email) {
     return res.status(400).json({
       error: 'Missing fields.',
-      usage: '/api/setup?secret=YOUR_SECRET&username=daniel&password=MyPass123&name=Daniel%20Okafor&role=admin',
+      usage: '/api/setup?secret=YOUR_SECRET&username=daniel&password=MyPass123&name=Daniel%20Okafor&email=daniel%40landblaze.com&role=admin',
       roles: 'realtor (default), manager, admin'
     });
+  }
+
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ error: 'Please provide a valid email address.' });
   }
 
   if (password.length < 8) {
@@ -118,6 +132,7 @@ async function setup(req, res) {
   }
 
   const cleanUsername = username.trim().toLowerCase();
+  const cleanEmail = email.trim().toLowerCase();
   const cleanRole = ['realtor', 'manager', 'admin'].includes(role) ? role : 'realtor';
 
   const users = await getUsers();
@@ -131,6 +146,7 @@ async function setup(req, res) {
     id: `u_${Date.now()}`,
     username: cleanUsername,
     displayName: name.trim(),
+    email: cleanEmail,
     role: cleanRole,
     passwordHash,
     createdAt: new Date().toISOString(),
@@ -145,6 +161,7 @@ async function setup(req, res) {
     user: {
       username: user.username,
       displayName: user.displayName,
+      email: user.email,
       role: user.role,
     },
     reminder: 'Once all your users are created, ask Claude to remove the setup action from api/staff/[action].js.'

@@ -294,20 +294,39 @@ export async function createSalesOrder({ customerId, date, itemId, lineItemName,
   };
 }
 
-export async function sendSalesOrderEmail(salesorderId, { email, salesorderNumber, sendAttachment = false } = {}) {
+export async function sendSalesOrderEmail(salesorderId, { email, ccEmail, salesorderNumber, sendAttachment = false, contractCode } = {}) {
   // Zoho's /email endpoint rejects calls where subject/body are omitted
   // ("Invalid value passed for Subject") — it does not silently fall back
   // to a template the way the field docs implied. The reliable approach is
   // to first GET the pre-filled email content Zoho would use, then POST
   // that same subject/body back, only overriding the recipient.
   const template = await zohoRequest('get', `/salesorders/${salesorderId}/email`);
-  const { subject, body } = extractEmailTemplate(
+  const { subject: templateSubject, body } = extractEmailTemplate(
     template,
     `Sales Order ${salesorderNumber || salesorderId}`
   );
+  // When this sales order carries an attached Contract of Sale, say so in
+  // the subject line so the customer immediately knows to expect/open it,
+  // and include our own short contract reference code for easy lookup.
+  const subject = sendAttachment
+    ? `${templateSubject} — Sales Contract Attached${contractCode ? ` (Ref: ${contractCode})` : ''}`
+    : templateSubject;
   const payload = { subject, body };
   if (email) payload.to_mail_ids = [email];
   if (sendAttachment) payload.send_attachment = true;
+
+  if (ccEmail) {
+    // cc_mail_ids isn't independently confirmed against Zoho's current API
+    // for this specific endpoint, so attempt with CC first and gracefully
+    // retry without it if Zoho rejects the field — the customer's email is
+    // the priority and must not be blocked by a CC-only failure.
+    try {
+      await zohoRequest('post', `/salesorders/${salesorderId}/email`, { data: { ...payload, cc_mail_ids: [ccEmail] } });
+      return;
+    } catch (e) {
+      // fall through and retry without CC
+    }
+  }
   await zohoRequest('post', `/salesorders/${salesorderId}/email`, { data: payload });
 }
 
@@ -340,18 +359,30 @@ export async function createInvoice({ customerId, date, itemId, lineItemName, ra
   return { invoice_id: data.invoice.invoice_id, invoice_number: data.invoice.invoice_number };
 }
 
-export async function sendInvoiceEmail(invoiceId, { email, invoiceNumber, sendAttachment = false } = {}) {
+export async function sendInvoiceEmail(invoiceId, { email, ccEmail, invoiceNumber, sendAttachment = false, contractCode } = {}) {
   // Same fix as sales orders: GET the pre-filled email content first, then
   // POST it back rather than omitting subject/body and hoping for a
   // server-side default — Zoho's /email endpoint rejects an empty subject.
   const template = await zohoRequest('get', `/invoices/${invoiceId}/email`);
-  const { subject, body } = extractEmailTemplate(
+  const { subject: templateSubject, body } = extractEmailTemplate(
     template,
     `Invoice ${invoiceNumber || invoiceId}`
   );
+  const subject = sendAttachment
+    ? `${templateSubject} — Sales Contract Attached${contractCode ? ` (Ref: ${contractCode})` : ''}`
+    : templateSubject;
   const payload = { subject, body };
   if (email) payload.to_mail_ids = [email];
   if (sendAttachment) payload.send_attachment = true;
+
+  if (ccEmail) {
+    try {
+      await zohoRequest('post', `/invoices/${invoiceId}/email`, { data: { ...payload, cc_mail_ids: [ccEmail] } });
+      return;
+    } catch (e) {
+      // fall through and retry without CC
+    }
+  }
   await zohoRequest('post', `/invoices/${invoiceId}/email`, { data: payload });
 }
 
@@ -382,7 +413,7 @@ export async function createCustomerPayment({ customerId, amount, paymentMode, a
   return { payment_id: data.payment.payment_id, payment_number: data.payment.payment_number };
 }
 
-export async function sendPaymentReceiptEmail(paymentId, { email, paymentNumber, extraBodyHtml } = {}) {
+export async function sendPaymentReceiptEmail(paymentId, { email, ccEmail, paymentNumber, extraBodyHtml } = {}) {
   // NOTE: Zoho Books' public v3 API documentation does not list a
   // dedicated "email a customer payment" endpoint the way it does for
   // invoices and sales orders. We use the same GET-then-POST pattern as
@@ -403,6 +434,15 @@ export async function sendPaymentReceiptEmail(paymentId, { email, paymentNumber,
   const finalBody = extraBodyHtml ? `${body}${extraBodyHtml}` : body;
   const payload = { subject, body: finalBody };
   if (email) payload.to_mail_ids = [email];
+
+  if (ccEmail) {
+    try {
+      await zohoRequest('post', `/customerpayments/${paymentId}/email`, { data: { ...payload, cc_mail_ids: [ccEmail] } });
+      return;
+    } catch (e) {
+      // fall through and retry without CC
+    }
+  }
   await zohoRequest('post', `/customerpayments/${paymentId}/email`, { data: payload });
 }
 

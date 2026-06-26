@@ -6,6 +6,7 @@ import { getTransactions, saveTransactions } from '../_lib/db.js';
 import * as zoho from '../_lib/zoho.js';
 import { buildContractPdf } from '../_lib/contract.js';
 import { buildPaymentHistoryTable } from '../_lib/paymentHistory.js';
+import { generateContractCode } from '../_lib/contractCode.js';
 
 export default async function handler(req, res) {
   if (handleCors(req, res)) return;
@@ -17,7 +18,7 @@ export default async function handler(req, res) {
 
     const {
       custType, txType, customer, newCust, salesOrder,
-      propDesc, item, fullPrice, amtPaid, payDate, payMode,
+      propDesc, plotSize, item, fullPrice, amtPaid, payDate, payMode,
       bankAccount, payRef, salesperson, notes,
     } = req.body || {};
 
@@ -90,6 +91,8 @@ export default async function handler(req, res) {
     let emailSent = false;
     const emailErrors = [];
 
+    let contractCode = null;
+
     if (txType === 'outright') {
       const notesText = `Full payment received. ${payMode}${payRef ? ' Ref: ' + payRef : ''}${notes ? ' — ' + notes : ''}`;
       const invoice = await zoho.createInvoice({
@@ -103,22 +106,24 @@ export default async function handler(req, res) {
       // invoice so it goes out as a real attachment on the same email —
       // non-blocking: a contract failure shouldn't stop the sale itself.
       try {
+        contractCode = await generateContractCode(payDate);
         const contractPdf = await buildContractPdf({
-          customerName, customerAddress, propertyDescription: itemLabel,
+          customerName, customerAddress, propertyDescription: itemLabel, plotSize,
           fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
-          contractDate: payDate, documentNumber: invoice.invoice_number,
+          contractDate: payDate, documentNumber: invoice.invoice_number, contractCode,
         });
         await zoho.attachContractToInvoice(invoice.invoice_id, contractPdf);
       } catch (e) {
         emailErrors.push(`Contract generation: ${e.message}`);
       }
 
-      // Send the invoice to the customer (emails their copy) and
-      // explicitly mark it as sent — this is what moves it out of draft
-      // status in Zoho Books. Done independently so a failed email
-      // doesn't leave the invoice stuck in Draft.
+      // Send the invoice to the customer (emails their copy, CC'd to the
+      // realtor who processed the sale) and explicitly mark it as sent —
+      // this is what moves it out of draft status in Zoho Books. Done
+      // independently so a failed email doesn't leave the invoice stuck
+      // in Draft.
       try {
-        await zoho.sendInvoiceEmail(invoice.invoice_id, { email: customerEmail, invoiceNumber: invoice.invoice_number, sendAttachment: true });
+        await zoho.sendInvoiceEmail(invoice.invoice_id, { email: customerEmail, ccEmail: session.email, invoiceNumber: invoice.invoice_number, sendAttachment: true, contractCode });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Invoice email: ${e.message}`);
@@ -141,22 +146,24 @@ export default async function handler(req, res) {
       // Same as outright: generate and attach the customized contract,
       // non-blocking on failure.
       try {
+        contractCode = await generateContractCode(payDate);
         const contractPdf = await buildContractPdf({
-          customerName, customerAddress, propertyDescription: itemLabel,
+          customerName, customerAddress, propertyDescription: itemLabel, plotSize,
           fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
-          contractDate: payDate, documentNumber: so.salesorder_number,
+          contractDate: payDate, documentNumber: so.salesorder_number, contractCode,
         });
         await zoho.attachContractToSalesOrder(so.salesorder_id, contractPdf);
       } catch (e) {
         emailErrors.push(`Contract generation: ${e.message}`);
       }
 
-      // Send the sales order to the customer (emails their copy) and
-      // explicitly mark it as Open — sales orders use Draft/Open/Closed/Void
-      // in Zoho Books (not "sent"). Done independently so a failed email
-      // doesn't leave the order stuck in Draft.
+      // Send the sales order to the customer (emails their copy, CC'd to
+      // the realtor who processed the sale) and explicitly mark it as
+      // Open — sales orders use Draft/Open/Closed/Void in Zoho Books (not
+      // "sent"). Done independently so a failed email doesn't leave the
+      // order stuck in Draft.
       try {
-        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, salesorderNumber: so.salesorder_number, sendAttachment: true });
+        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, ccEmail: session.email, salesorderNumber: so.salesorder_number, sendAttachment: true, contractCode });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Sales order email: ${e.message}`);
@@ -206,6 +213,7 @@ export default async function handler(req, res) {
     try {
       await zoho.sendPaymentReceiptEmail(payment.payment_id, {
         email: customerEmail,
+        ccEmail: session.email,
         paymentNumber: payment.payment_number,
         extraBodyHtml: paymentHistoryHtml,
       });
@@ -220,12 +228,14 @@ export default async function handler(req, res) {
       timestamp: new Date().toISOString(),
       realtor: session.displayName,
       realtorUsername: session.username,
+      realtorEmail: session.email || '',
       custName: customerName,
       custId: customerId,
       custEmail: customerEmail || '',
       custCreated: customerCreated,
       txType,
       propDesc: itemLabel,
+      plotSize: plotSize || '',
       amtPaid: Number(amtPaid),
       fullPrice: Number(fullPrice || 0),
       payMode,
@@ -234,6 +244,7 @@ export default async function handler(req, res) {
       docType,
       docId,
       docNumber,
+      contractCode,
       paymentId: payment.payment_id,
       soNumber: txType === 'topup' ? salesOrder.salesorder_number : null,
       emailSent,

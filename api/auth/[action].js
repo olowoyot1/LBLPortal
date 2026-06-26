@@ -34,7 +34,7 @@ async function login(req, res) {
       'Set-Cookie',
       `session=${token}; HttpOnly; SameSite=Lax; Max-Age=${12 * 3600}; Path=/${isProd ? '; Secure' : ''}`
     );
-    res.json({ displayName: user.displayName, role: user.role });
+    res.json({ displayName: user.displayName, role: user.role, username: user.username, email: user.email || '' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Internal server error' });
@@ -59,7 +59,7 @@ async function me(req, res) {
   try {
     const session = await requireAuth(req, res);
     if (!session) return;
-    res.json({ displayName: session.displayName, role: session.role });
+    res.json({ displayName: session.displayName, role: session.role, username: session.username, email: session.email || '' });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Internal server error' });

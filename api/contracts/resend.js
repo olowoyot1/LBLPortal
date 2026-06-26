@@ -7,9 +7,10 @@
 // Zoho Books before resending.
 import { handleCors } from '../_lib/cors.js';
 import { requireAuth } from '../_lib/auth.js';
-import { getTransactions } from '../_lib/db.js';
+import { getTransactions, saveTransactions } from '../_lib/db.js';
 import * as zoho from '../_lib/zoho.js';
 import { buildContractPdf } from '../_lib/contract.js';
+import { generateContractCode } from '../_lib/contractCode.js';
 
 export default async function handler(req, res) {
   if (handleCors(req, res)) return;
@@ -46,25 +47,41 @@ export default async function handler(req, res) {
       customerAddress = '';
     }
 
+    // Older transactions (created before contract codes existed) won't
+    // have one stored — generate one now and persist it back to the log
+    // so the code stays stable across any future resends of this same
+    // transaction, rather than minting a new one every time.
+    let contractCode = tx.contractCode;
+    if (!contractCode) {
+      contractCode = await generateContractCode(tx.timestamp);
+      const idx = transactions.findIndex((t) => t.id === tx.id);
+      if (idx !== -1) {
+        transactions[idx] = { ...transactions[idx], contractCode };
+        await saveTransactions(transactions);
+      }
+    }
+
     const contractPdf = await buildContractPdf({
       customerName: tx.custName,
       customerAddress,
       propertyDescription: tx.propDesc,
+      plotSize: tx.plotSize,
       fullPrice: tx.fullPrice,
       amountPaid: tx.amtPaid,
       contractDate: tx.timestamp,
       documentNumber: tx.docNumber,
+      contractCode,
     });
 
     if (tx.docType === 'invoice') {
       await zoho.attachContractToInvoice(tx.docId, contractPdf);
-      await zoho.sendInvoiceEmail(tx.docId, { email: tx.custEmail, invoiceNumber: tx.docNumber, sendAttachment: true });
+      await zoho.sendInvoiceEmail(tx.docId, { email: tx.custEmail, ccEmail: tx.realtorEmail, invoiceNumber: tx.docNumber, sendAttachment: true, contractCode });
     } else {
       await zoho.attachContractToSalesOrder(tx.docId, contractPdf);
-      await zoho.sendSalesOrderEmail(tx.docId, { email: tx.custEmail, salesorderNumber: tx.docNumber, sendAttachment: true });
+      await zoho.sendSalesOrderEmail(tx.docId, { email: tx.custEmail, ccEmail: tx.realtorEmail, salesorderNumber: tx.docNumber, sendAttachment: true, contractCode });
     }
 
-    res.json({ success: true, custEmail: tx.custEmail, docNumber: tx.docNumber });
+    res.json({ success: true, custEmail: tx.custEmail, docNumber: tx.docNumber, contractCode });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message || 'Internal server error' });
