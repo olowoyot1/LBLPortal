@@ -1,7 +1,7 @@
 // api/_lib/auth.js
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { getSessions, saveSessions } from './db.js';
+import { getSessions, saveSessions, getUsers } from './db.js';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
@@ -53,7 +53,14 @@ export function parseSessionCookie(cookieHeader) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-// Middleware-style: returns the session or sends 401
+// Middleware-style: returns the session or sends 401.
+// The stored session is just a static token + identity snapshot from
+// login time — profile edits (email, display name, role) made afterward
+// via the staff admin panel wouldn't otherwise take effect until the user
+// logs out and back in. To avoid that confusing lag, we overlay the
+// user's current record on top of the session on every request. If the
+// account no longer exists (deleted since login), treat it the same as
+// an expired session rather than trusting stale cached values.
 export async function requireAuth(req, res) {
   const token = parseSessionCookie(req.headers.cookie);
   const session = await lookupSession(token);
@@ -61,5 +68,18 @@ export async function requireAuth(req, res) {
     res.status(401).json({ error: 'Not authenticated. Please log in again.' });
     return null;
   }
-  return session;
+
+  const users = await getUsers();
+  const user = users.find((u) => u.username === session.username);
+  if (!user) {
+    res.status(401).json({ error: 'Your account no longer exists. Please contact an admin.' });
+    return null;
+  }
+
+  return {
+    ...session,
+    displayName: user.displayName,
+    email: user.email || '',
+    role: user.role,
+  };
 }

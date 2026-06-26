@@ -592,11 +592,11 @@ async function renderStaff() {
             <td style="color:var(--muted);font-size:12px">${escapeHtml(u.email || '—')}</td>
             <td><span class="tx-badge ${roleColors[u.role] || ''}">${escapeHtml(u.role)}</span></td>
             <td style="color:var(--muted);font-size:11px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-NG') : '—'}</td>
-            <td>
+            <td style="white-space:nowrap">
               <div style="display:flex;gap:6px;justify-content:flex-end">
-                <button onclick="openEditUserForm('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--gold-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--gold);cursor:pointer;font-family:'DM Sans',sans-serif">Edit</button>
+                <button onclick="openEditUserForm('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--gold-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--gold);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">Edit</button>
                 ${u.username !== currentUser.username
-                  ? `<button onclick="deleteUser('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--red-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;font-family:'DM Sans',sans-serif">Remove</button>`
+                  ? `<button onclick="deleteUser('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--red-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">Remove</button>`
                   : '<span style="font-size:11px;color:var(--muted);align-self:center">You</span>'
                 }
               </div>
