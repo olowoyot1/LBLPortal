@@ -5,6 +5,7 @@
 // Public URLs are unchanged (mapped via vercel.json rewrites):
 //   GET    /api/staff                  -> action=manage  (list, admin only)
 //   POST   /api/staff                  -> action=manage  (create, admin only)
+//   PUT    /api/staff?username=...     -> action=manage  (edit, admin only)
 //   DELETE /api/staff?username=...     -> action=manage  (remove, admin only)
 //   GET    /api/setup?secret=...       -> action=setup   (one-time bootstrap)
 //   GET    /api/health                 -> action=health  (uptime ping)
@@ -75,6 +76,50 @@ async function manage(req, res) {
 
     const { passwordHash: _, ...safeUser } = user;
     return res.status(201).json(safeUser);
+  }
+
+  if (req.method === 'PUT') {
+    const username = (req.query.username || '').trim().toLowerCase();
+    if (!username) return res.status(400).json({ error: 'Username is required.' });
+
+    const users = await getUsers();
+    const idx = users.findIndex((u) => u.username === username);
+    if (idx === -1) return res.status(404).json({ error: `User "${username}" not found.` });
+
+    const { displayName, email, role, password } = req.body || {};
+    const existing = users[idx];
+    const updated = { ...existing };
+
+    if (displayName !== undefined) {
+      if (!displayName.trim()) return res.status(400).json({ error: 'Display name cannot be empty.' });
+      updated.displayName = displayName.trim();
+    }
+
+    if (email !== undefined) {
+      if (!isValidEmail(email)) return res.status(400).json({ error: 'Please enter a valid email address.' });
+      updated.email = email.trim().toLowerCase();
+    }
+
+    if (role !== undefined) {
+      if (!['realtor', 'manager', 'admin'].includes(role)) {
+        return res.status(400).json({ error: 'Role must be realtor, manager, or admin.' });
+      }
+      if (username === session.username && role !== 'admin') {
+        return res.status(400).json({ error: 'You cannot remove your own admin role.' });
+      }
+      updated.role = role;
+    }
+
+    if (password !== undefined && password !== '') {
+      if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+      updated.passwordHash = await bcrypt.hash(password, 12);
+    }
+
+    users[idx] = updated;
+    await saveUsers(users);
+
+    const { passwordHash: _, ...safeUser } = updated;
+    return res.json(safeUser);
   }
 
   if (req.method === 'DELETE') {

@@ -108,6 +108,7 @@ a{color:var(--gold);text-decoration:none}
 .form-row input:focus,.form-row select:focus{border-color:var(--gold-border)}
 .form-row input::placeholder{color:#2a2a2a}
 .form-row select option{background:var(--surface)}
+.form-row input:disabled{opacity:0.5;cursor:not-allowed}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
 /* SEGMENT BUTTONS */
@@ -578,16 +579,16 @@ a{color:var(--gold);text-decoration:none}
       <button class="log-btn gold" onclick="showCreateUserForm()">+ Add Staff</button>
     </div>
 
-    <!-- Create user form (hidden by default) -->
+    <!-- Create/Edit user form (hidden by default) -->
     <div class="card hidden" id="create-user-card">
-      <div class="card-title">New Staff Account</div>
+      <div class="card-title" id="create-user-card-title">New Staff Account</div>
       <div class="grid2">
         <div class="form-row"><label>Username *</label><input type="text" id="su-username" placeholder="e.g. amaka"/></div>
         <div class="form-row"><label>Display Name *</label><input type="text" id="su-name" placeholder="e.g. Amaka Obi"/></div>
       </div>
       <div class="grid2">
         <div class="form-row"><label>Email *</label><input type="email" id="su-email" placeholder="e.g. amaka@landblaze.com"/></div>
-        <div class="form-row"><label>Password * (min 8 chars)</label><input type="password" id="su-password" placeholder="••••••••"/></div>
+        <div class="form-row"><label id="su-password-label">Password * (min 8 chars)</label><input type="password" id="su-password" placeholder="••••••••"/></div>
       </div>
       <div class="form-row"><label>Role</label>
         <select id="su-role">

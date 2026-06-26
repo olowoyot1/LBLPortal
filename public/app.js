@@ -568,11 +568,13 @@ async function exportCSV() {
 }
 
 // ── STAFF MANAGEMENT (admin only) ──
+let staffCache = [];
 
 async function renderStaff() {
   el('staff-body').innerHTML = '<div class="log-empty"><span class="spinner"></span>Loading...</div>';
   try {
     const users = await api('/api/staff');
+    staffCache = users;
     if (!users.length) {
       el('staff-body').innerHTML = '<div class="log-empty">No staff accounts found.</div>';
       return;
@@ -590,10 +592,15 @@ async function renderStaff() {
             <td style="color:var(--muted);font-size:12px">${escapeHtml(u.email || '—')}</td>
             <td><span class="tx-badge ${roleColors[u.role] || ''}">${escapeHtml(u.role)}</span></td>
             <td style="color:var(--muted);font-size:11px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-NG') : '—'}</td>
-            <td>${u.username !== currentUser.username
-              ? `<button onclick="deleteUser('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--red-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;font-family:'DM Sans',sans-serif">Remove</button>`
-              : '<span style="font-size:11px;color:var(--muted)">You</span>'
-            }</td>
+            <td>
+              <div style="display:flex;gap:6px;justify-content:flex-end">
+                <button onclick="openEditUserForm('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--gold-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--gold);cursor:pointer;font-family:'DM Sans',sans-serif">Edit</button>
+                ${u.username !== currentUser.username
+                  ? `<button onclick="deleteUser('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--red-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;font-family:'DM Sans',sans-serif">Remove</button>`
+                  : '<span style="font-size:11px;color:var(--muted);align-self:center">You</span>'
+                }
+              </div>
+            </td>
           </tr>`).join('')}
         </tbody>
       </table>`;
@@ -602,19 +609,49 @@ async function renderStaff() {
   }
 }
 
+let editingUsername = null; // null = create mode; set = edit mode
+
 function showCreateUserForm() {
+  editingUsername = null;
+  el('create-user-card-title').textContent = 'New Staff Account';
   ['su-username', 'su-name', 'su-email', 'su-password'].forEach((id) => { el(id).value = ''; });
+  el('su-username').disabled = false;
+  el('su-password').placeholder = '••••••••';
+  el('su-password-label').textContent = 'Password * (min 8 chars)';
   el('su-role').value = 'realtor';
+  el('su-submit').textContent = 'Create Account';
   el('su-error').classList.add('hidden');
   el('create-user-card').classList.remove('hidden');
   el('su-username').focus();
 }
 
+function openEditUserForm(username) {
+  const u = staffCache.find((x) => x.username === username);
+  if (!u) return;
+  editingUsername = u.username;
+  el('create-user-card-title').textContent = `Edit ${u.displayName}`;
+  el('su-username').value = u.username;
+  el('su-username').disabled = true;
+  el('su-name').value = u.displayName;
+  el('su-email').value = u.email || '';
+  el('su-password').value = '';
+  el('su-password').placeholder = 'Leave blank to keep current password';
+  el('su-password-label').textContent = 'New Password (optional, min 8 chars)';
+  el('su-role').value = u.role;
+  el('su-submit').textContent = 'Save Changes';
+  el('su-error').classList.add('hidden');
+  el('create-user-card').classList.remove('hidden');
+  el('su-name').focus();
+}
+
 function hideCreateUserForm() {
   el('create-user-card').classList.add('hidden');
+  el('su-username').disabled = false;
+  editingUsername = null;
 }
 
 async function submitCreateUser() {
+  const isEdit = Boolean(editingUsername);
   const username = el('su-username').value.trim();
   const displayName = el('su-name').value.trim();
   const email = el('su-email').value.trim();
@@ -622,33 +659,47 @@ async function submitCreateUser() {
   const role = el('su-role').value;
 
   el('su-error').classList.add('hidden');
-  if (!username || !displayName || !email || !password) {
+
+  if (isEdit) {
+    if (!displayName || !email) {
+      el('su-error').textContent = 'Display name and email are required.';
+      el('su-error').classList.remove('hidden');
+      return;
+    }
+  } else if (!username || !displayName || !email || !password) {
     el('su-error').textContent = 'All fields are required.';
     el('su-error').classList.remove('hidden');
     return;
   }
+
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     el('su-error').textContent = 'Please enter a valid email address.';
     el('su-error').classList.remove('hidden');
     return;
   }
-  if (password.length < 8) {
+  if (password && password.length < 8) {
     el('su-error').textContent = 'Password must be at least 8 characters.';
     el('su-error').classList.remove('hidden');
     return;
   }
 
   const btn = el('su-submit');
-  btn.disabled = true; btn.textContent = 'Creating...';
+  btn.disabled = true; btn.textContent = isEdit ? 'Saving...' : 'Creating...';
   try {
-    await api('/api/staff', { method: 'POST', body: JSON.stringify({ username, displayName, email, password, role }) });
+    if (isEdit) {
+      const body = { displayName, email, role };
+      if (password) body.password = password;
+      await api(`/api/staff?username=${encodeURIComponent(editingUsername)}`, { method: 'PUT', body: JSON.stringify(body) });
+    } else {
+      await api('/api/staff', { method: 'POST', body: JSON.stringify({ username, displayName, email, password, role }) });
+    }
     hideCreateUserForm();
     renderStaff();
   } catch (e) {
     el('su-error').textContent = e.message;
     el('su-error').classList.remove('hidden');
   }
-  btn.disabled = false; btn.textContent = 'Create Account';
+  btn.disabled = false; btn.textContent = isEdit ? 'Save Changes' : 'Create Account';
 }
 
 async function deleteUser(username) {
