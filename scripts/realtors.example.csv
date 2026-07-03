@@ -1,4 +1,4 @@
-username,name,password,role
-daniel,Daniel Okafor,MyPass123,realtor
-ada,Ada Nwosu,,realtor
-chidi,Chidi Eze,Secret456,manager
+username,name,email,password,role
+tunde,Tunde Bakare,tunde@landblaze.com,MyPass123,realtor
+ada,Ada Nwosu,ada@landblaze.com,,realtor
+chidi,Chidi Eze,chidi@landblaze.com,Secret456,manager

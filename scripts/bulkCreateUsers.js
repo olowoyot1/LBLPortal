@@ -42,6 +42,8 @@ const kv = createClient({
 });
 
 const VALID_ROLES = ['realtor', 'manager', 'admin'];
+const SOLE_ADMIN_USERNAME = 'daniel'; // must match api/staff/[action].js
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function generatePassword(length = 10) {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
@@ -131,6 +133,7 @@ async function main() {
     const displayName = (row.name || row.displayname || '').trim() || username;
     let role = (row.role || 'realtor').trim().toLowerCase();
     let password = (row.password || '').trim();
+    let email = (row.email || '').trim().toLowerCase();
     let generated = false;
 
     if (!username) {
@@ -143,6 +146,16 @@ async function main() {
     }
     if (!VALID_ROLES.includes(role)) {
       results.push({ username, name: displayName, role, password: '', status: `SKIPPED — invalid role "${role}"` });
+      continue;
+    }
+    if (role === 'admin' && username !== SOLE_ADMIN_USERNAME) {
+      results.push({ username, name: displayName, role, password: '', status: `SKIPPED — only "${SOLE_ADMIN_USERNAME}" can be admin` });
+      continue;
+    }
+    if (!email) {
+      email = `${username}@landblaze.local`;
+    } else if (!EMAIL_RE.test(email)) {
+      results.push({ username, name: displayName, role, password: '', status: 'SKIPPED — invalid email' });
       continue;
     }
     if (!password) {
@@ -159,6 +172,7 @@ async function main() {
       id: `u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       username,
       displayName,
+      email,
       role,
       passwordHash,
       createdAt: new Date().toISOString(),

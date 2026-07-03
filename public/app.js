@@ -573,6 +573,7 @@ async function exportCSV() {
 }
 
 // ── STAFF MANAGEMENT (admin only) ──
+const SOLE_ADMIN_USERNAME = 'daniel'; // must match api/staff/[action].js
 let staffCache = [];
 
 async function renderStaff() {
@@ -586,23 +587,23 @@ async function renderStaff() {
     }
     const roleColors = { admin: 'tx-outright', manager: 'tx-installment', realtor: 'tx-topup' };
     el('staff-body').innerHTML = `
-      <table class="log-table">
+      <table class="log-table staff-table">
         <thead><tr>
           <th>Username</th><th>Display Name</th><th>Email</th><th>Role</th><th>Created</th><th></th>
         </tr></thead>
         <tbody>${users.map((u) => `
           <tr>
-            <td style="font-family:'DM Mono',monospace;font-size:12px">${escapeHtml(u.username)}</td>
-            <td style="font-weight:500">${escapeHtml(u.displayName)}</td>
-            <td style="color:var(--muted);font-size:12px">${escapeHtml(u.email || '—')}</td>
-            <td><span class="tx-badge ${roleColors[u.role] || ''}">${escapeHtml(u.role)}</span></td>
-            <td style="color:var(--muted);font-size:11px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-NG') : '—'}</td>
-            <td style="white-space:nowrap">
+            <td data-label="Username" style="font-family:'DM Mono',monospace;font-size:12px">${escapeHtml(u.username)}</td>
+            <td data-label="Display Name" style="font-weight:500">${escapeHtml(u.displayName)}</td>
+            <td data-label="Email" style="color:var(--muted);font-size:12px">${escapeHtml(u.email || '—')}</td>
+            <td data-label="Role"><span class="tx-badge ${roleColors[u.role] || ''}">${escapeHtml(u.role)}</span></td>
+            <td data-label="Created" style="color:var(--muted);font-size:11px">${u.createdAt ? new Date(u.createdAt).toLocaleDateString('en-NG') : '—'}</td>
+            <td class="staff-actions" style="white-space:nowrap">
               <div style="display:flex;gap:6px;justify-content:flex-end">
                 <button onclick="openEditUserForm('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--gold-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--gold);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">Edit</button>
-                ${u.username !== currentUser.username
+                ${u.username !== currentUser.username && u.username !== SOLE_ADMIN_USERNAME
                   ? `<button onclick="deleteUser('${escapeHtml(u.username)}')" style="background:transparent;border:0.5px solid var(--red-border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap">Remove</button>`
-                  : '<span style="font-size:11px;color:var(--muted);align-self:center">You</span>'
+                  : `<span style="font-size:11px;color:var(--muted);align-self:center">${u.username === currentUser.username ? 'You' : 'Protected'}</span>`
                 }
               </div>
             </td>
@@ -627,7 +628,19 @@ function showCreateUserForm() {
   el('su-submit').textContent = 'Create Account';
   el('su-error').classList.add('hidden');
   el('create-user-card').classList.remove('hidden');
+  updateRoleOptionsForUsername('');
   el('su-username').focus();
+}
+
+function updateRoleOptionsForUsername(username) {
+  const isSoleAdmin = username.trim().toLowerCase() === SOLE_ADMIN_USERNAME;
+  const adminOption = el('su-role').querySelector('option[value="admin"]');
+  if (adminOption) adminOption.disabled = !isSoleAdmin;
+  if (isSoleAdmin) {
+    el('su-role').value = 'admin';
+  } else if (el('su-role').value === 'admin') {
+    el('su-role').value = 'realtor';
+  }
 }
 
 function openEditUserForm(username) {
@@ -642,6 +655,7 @@ function openEditUserForm(username) {
   el('su-password').value = '';
   el('su-password').placeholder = 'Leave blank to keep current password';
   el('su-password-label').textContent = 'New Password (optional, min 8 chars)';
+  updateRoleOptionsForUsername(u.username);
   el('su-role').value = u.role;
   el('su-submit').textContent = 'Save Changes';
   el('su-error').classList.add('hidden');
@@ -715,6 +729,115 @@ async function deleteUser(username) {
   } catch (e) {
     alert(e.message);
   }
+}
+
+// ── bulk staff upload (admin only) ──
+function parseCsvClient(text) {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return [];
+  const parseLine = (line) => {
+    const out = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuotes) {
+        if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+        else if (ch === '"') { inQuotes = false; }
+        else { cur += ch; }
+      } else {
+        if (ch === '"') inQuotes = true;
+        else if (ch === ',') { out.push(cur); cur = ''; }
+        else cur += ch;
+      }
+    }
+    out.push(cur);
+    return out.map((s) => s.trim());
+  };
+  const header = parseLine(lines[0]).map((h) => h.toLowerCase());
+  return lines.slice(1).map((line) => {
+    const cells = parseLine(line);
+    const row = {};
+    header.forEach((h, i) => { row[h] = cells[i] ?? ''; });
+    return row;
+  });
+}
+
+function showBulkUploadForm() {
+  el('bulk-file-input').value = '';
+  el('bulk-csv-text').value = '';
+  el('bulk-error').classList.add('hidden');
+  el('bulk-results').innerHTML = '';
+  el('bulk-upload-card').classList.remove('hidden');
+}
+
+function hideBulkUploadForm() {
+  el('bulk-upload-card').classList.add('hidden');
+}
+
+function handleBulkFileSelected(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => { el('bulk-csv-text').value = reader.result; };
+  reader.onerror = () => {
+    el('bulk-error').textContent = 'Could not read that file.';
+    el('bulk-error').classList.remove('hidden');
+  };
+  reader.readAsText(file);
+}
+
+async function submitBulkUpload() {
+  el('bulk-error').classList.add('hidden');
+  el('bulk-results').innerHTML = '';
+  const text = el('bulk-csv-text').value.trim();
+  if (!text) {
+    el('bulk-error').textContent = 'Choose a CSV file or paste CSV text first.';
+    el('bulk-error').classList.remove('hidden');
+    return;
+  }
+
+  let rows;
+  try {
+    rows = parseCsvClient(text);
+  } catch (e) {
+    el('bulk-error').textContent = 'Could not parse that CSV.';
+    el('bulk-error').classList.remove('hidden');
+    return;
+  }
+  if (rows.length === 0) {
+    el('bulk-error').textContent = 'No data rows found in the CSV.';
+    el('bulk-error').classList.remove('hidden');
+    return;
+  }
+
+  const btn = el('bulk-submit');
+  btn.disabled = true; btn.textContent = 'Uploading...';
+  try {
+    const { results } = await api('/api/staff/bulk', { method: 'POST', body: JSON.stringify({ rows }) });
+    const createdCount = results.filter((r) => r.status.startsWith('CREATED')).length;
+    el('bulk-results').innerHTML = `
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${createdCount} of ${results.length} account(s) created.</div>
+      <table class="log-table" style="font-size:11px">
+        <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Password</th></tr></thead>
+        <tbody>${results.map((r) => `
+          <tr>
+            <td>${escapeHtml(r.username || '—')}</td>
+            <td>${escapeHtml(r.role || '—')}</td>
+            <td style="color:${r.status.startsWith('CREATED') ? 'var(--text)' : 'var(--red)'}">${escapeHtml(r.status)}</td>
+            <td style="font-family:'DM Mono',monospace">${r.password ? escapeHtml(r.password) : '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+      <p style="color:var(--muted);font-size:11px;margin-top:8px">
+        Any auto-generated passwords are shown once above — copy them out to share with each realtor now.
+      </p>`;
+    renderStaff();
+  } catch (e) {
+    el('bulk-error').textContent = e.message;
+    el('bulk-error').classList.remove('hidden');
+  }
+  btn.disabled = false; btn.textContent = 'Upload & Create';
 }
 
 // ── subscription (admin only) ──

@@ -11,6 +11,7 @@
 //   GET    /api/health                 -> action=health  (uptime ping)
 //   GET    /api/license                -> action=license (status, admin only)
 //   POST   /api/license                -> action=license (renew, admin only)
+//   POST   /api/staff/bulk             -> action=bulk (bulk create, admin only)
 //
 // NOTE: api/setup (action=setup) is a one-time bootstrap endpoint for
 // creating your first user accounts. The original file carried a reminder
@@ -18,6 +19,7 @@
 // gated behind SETUP_SECRET, but if your users are already set up, ask
 // to have this branch removed entirely rather than just left dormant.
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { handleCors } from '../_lib/cors.js';
 import { requireAuth } from '../_lib/auth.js';
 import { getUsers, saveUsers } from '../_lib/db.js';
@@ -26,6 +28,29 @@ import { getLicenseStatus, renewLicense } from '../_lib/license.js';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function isValidEmail(e) {
   return typeof e === 'string' && EMAIL_RE.test(e.trim());
+}
+
+// Only this username may ever hold the admin role. Change this if the
+// designated admin's username changes.
+const SOLE_ADMIN_USERNAME = 'daniel';
+
+// Throws if the requested role/username combination isn't allowed.
+// Also refuses to let the sole admin be demoted away from admin, so the
+// app can never end up with zero working admin accounts.
+function assertRoleAllowed(username, role) {
+  const uname = username.trim().toLowerCase();
+  if (role === 'admin' && uname !== SOLE_ADMIN_USERNAME) {
+    throw new Error(`Only the "${SOLE_ADMIN_USERNAME}" account can hold the admin role.`);
+  }
+  if (uname === SOLE_ADMIN_USERNAME && role !== 'admin') {
+    throw new Error(`The "${SOLE_ADMIN_USERNAME}" account must stay admin.`);
+  }
+}
+
+function generatePassword(length = 10) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = crypto.randomBytes(length);
+  return Array.from(bytes).map((n) => chars[n % chars.length]).join('');
 }
 
 async function license(req, res) {
@@ -75,6 +100,93 @@ async function license(req, res) {
   return res.status(405).json({ error: 'Method not allowed' });
 }
 
+async function bulk(req, res) {
+  const session = await requireAuth(req, res);
+  if (!session) return;
+  if (session.role !== 'admin') {
+    return res.status(403).json({ error: 'Only admins can bulk-create staff accounts.' });
+  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const { rows } = req.body || {};
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: 'No rows provided.' });
+  }
+  if (rows.length > 500) {
+    return res.status(400).json({ error: 'Too many rows in one batch (limit 500).' });
+  }
+
+  const users = await getUsers();
+  const existing = new Set(users.map((u) => u.username));
+  const results = [];
+
+  for (const row of rows) {
+    const username = String(row.username || '').trim().toLowerCase();
+    const displayName = String(row.name || row.displayName || '').trim() || username;
+    const role = String(row.role || 'realtor').trim().toLowerCase() || 'realtor';
+    let email = String(row.email || '').trim().toLowerCase();
+    let password = String(row.password || '').trim();
+    let generated = false;
+
+    if (!username) {
+      results.push({ username: '', name: displayName, role, status: 'SKIPPED — missing username' });
+      continue;
+    }
+    if (existing.has(username)) {
+      results.push({ username, name: displayName, role, status: 'SKIPPED — already exists' });
+      continue;
+    }
+    if (!['realtor', 'manager', 'admin'].includes(role)) {
+      results.push({ username, name: displayName, role, status: `SKIPPED — invalid role "${role}"` });
+      continue;
+    }
+    try {
+      assertRoleAllowed(username, role);
+    } catch (err) {
+      results.push({ username, name: displayName, role, status: `SKIPPED — ${err.message}` });
+      continue;
+    }
+    if (!email) {
+      email = `${username}@landblaze.local`; // placeholder; can be edited later in Staff
+    } else if (!isValidEmail(email)) {
+      results.push({ username, name: displayName, role, status: 'SKIPPED — invalid email' });
+      continue;
+    }
+    if (!password) {
+      password = generatePassword();
+      generated = true;
+    }
+    if (password.length < 8) {
+      results.push({ username, name: displayName, role, status: 'SKIPPED — password must be at least 8 characters' });
+      continue;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = {
+      id: `u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      username,
+      displayName,
+      email,
+      role,
+      passwordHash,
+      createdAt: new Date().toISOString(),
+    };
+    users.push(user);
+    existing.add(username);
+
+    results.push({
+      username,
+      name: displayName,
+      role,
+      password: generated ? password : undefined, // only surfaced when auto-generated
+      status: generated ? 'CREATED — password auto-generated' : 'CREATED',
+    });
+  }
+
+  await saveUsers(users);
+  return res.json({ results });
+}
+
 async function manage(req, res) {
   const session = await requireAuth(req, res);
   if (!session) return;
@@ -104,6 +216,12 @@ async function manage(req, res) {
     const cleanUsername = username.trim().toLowerCase();
     const cleanEmail = email.trim().toLowerCase();
     const cleanRole = ['realtor', 'manager', 'admin'].includes(role) ? role : 'realtor';
+
+    try {
+      assertRoleAllowed(cleanUsername, cleanRole);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
 
     const users = await getUsers();
     if (users.some((u) => u.username === cleanUsername)) {
@@ -154,8 +272,10 @@ async function manage(req, res) {
       if (!['realtor', 'manager', 'admin'].includes(role)) {
         return res.status(400).json({ error: 'Role must be realtor, manager, or admin.' });
       }
-      if (username === session.username && role !== 'admin') {
-        return res.status(400).json({ error: 'You cannot remove your own admin role.' });
+      try {
+        assertRoleAllowed(username, role);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
       }
       updated.role = role;
     }
@@ -178,6 +298,9 @@ async function manage(req, res) {
 
     if (username === session.username) {
       return res.status(400).json({ error: 'You cannot remove your own account.' });
+    }
+    if (username === SOLE_ADMIN_USERNAME) {
+      return res.status(400).json({ error: `The "${SOLE_ADMIN_USERNAME}" account cannot be removed.` });
     }
 
     const users = await getUsers();
@@ -276,6 +399,7 @@ export default async function handler(req, res) {
     if (action === 'health') return health(req, res);
     if (action === 'setup') return await setup(req, res);
     if (action === 'manage') return await manage(req, res);
+    if (action === 'bulk') return await bulk(req, res);
     if (action === 'license') return await license(req, res);
     return res.status(404).json({ error: 'Not found' });
   } catch (err) {

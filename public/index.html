@@ -283,6 +283,35 @@ a{color:var(--gold);text-decoration:none}
 
 /* ── RESPONSIVE ── */
 @media (max-width: 600px) {
+  .staff-table, .staff-table thead, .staff-table tbody, .staff-table tr, .staff-table td {
+    display: block;
+    width: 100%;
+  }
+  .staff-table { min-width: 0; }
+  .staff-table thead { position: absolute; left: -9999px; top: -9999px; }
+  .staff-table tr {
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    padding: 10px 12px;
+  }
+  .staff-table td { border-bottom: none; padding: 3px 0; }
+  .staff-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 1px;
+  }
+  .staff-table td.staff-actions {
+    padding-top: 8px;
+    white-space: normal !important;
+  }
+  .staff-table td.staff-actions > div {
+    justify-content: flex-start !important;
+  }
   .nav {
     padding: 0 1rem;
     height: auto;
@@ -577,14 +606,17 @@ a{color:var(--gold);text-decoration:none}
   <div class="view" id="view-staff">
     <div class="log-header">
       <h2>Staff Management</h2>
-      <button class="log-btn gold" onclick="showCreateUserForm()">+ Add Staff</button>
+      <div style="display:flex;gap:8px">
+        <button class="log-btn" onclick="showBulkUploadForm()">Bulk Upload</button>
+        <button class="log-btn gold" onclick="showCreateUserForm()">+ Add Staff</button>
+      </div>
     </div>
 
     <!-- Create/Edit user form (hidden by default) -->
     <div class="card hidden" id="create-user-card">
       <div class="card-title" id="create-user-card-title">New Staff Account</div>
       <div class="grid2">
-        <div class="form-row"><label>Username *</label><input type="text" id="su-username" placeholder="e.g. amaka"/></div>
+        <div class="form-row"><label>Username *</label><input type="text" id="su-username" placeholder="e.g. amaka" oninput="updateRoleOptionsForUsername(this.value)"/></div>
         <div class="form-row"><label>Display Name *</label><input type="text" id="su-name" placeholder="e.g. Amaka Obi"/></div>
       </div>
       <div class="grid2">
@@ -603,6 +635,33 @@ a{color:var(--gold);text-decoration:none}
         <button class="btn-back" onclick="hideCreateUserForm()">Cancel</button>
         <button class="btn-next" id="su-submit" onclick="submitCreateUser()">Create Account</button>
       </div>
+    </div>
+
+    <!-- Bulk upload card (hidden by default) -->
+    <div class="card hidden" id="bulk-upload-card">
+      <div class="card-title">Bulk Upload Realtors / Staff</div>
+      <p style="color:var(--muted);font-size:12px;margin:0 0 0.75rem">
+        Upload a CSV with columns: <code>username,name,email,password,role</code>.
+        Password and role are optional — a random password is generated if left blank,
+        and role defaults to "realtor". Only the "daniel" account can be admin, so
+        rows with role "admin" for anyone else will be skipped automatically.
+      </p>
+      <div class="form-row">
+        <label>CSV file</label>
+        <input type="file" id="bulk-file-input" accept=".csv,text/csv" onchange="handleBulkFileSelected(event)"/>
+      </div>
+      <div class="form-row">
+        <label>...or paste CSV text</label>
+        <textarea id="bulk-csv-text" rows="6" style="width:100%;font-family:'DM Mono',monospace;font-size:12px;background:var(--surface2);color:var(--text);border:0.5px solid var(--border);border-radius:8px;padding:8px" placeholder="username,name,email,password,role
+ada,Ada Nwosu,ada@landblaze.com,,realtor
+chidi,Chidi Eze,chidi@landblaze.com,Secret456,manager"></textarea>
+      </div>
+      <div id="bulk-error" class="hidden" style="color:var(--red);font-size:12px;margin:0.5rem 0"></div>
+      <div class="action-bar" style="margin-top:0.5rem">
+        <button class="btn-back" onclick="hideBulkUploadForm()">Cancel</button>
+        <button class="btn-next" id="bulk-submit" onclick="submitBulkUpload()">Upload &amp; Create</button>
+      </div>
+      <div id="bulk-results" style="margin-top:1rem"></div>
     </div>
 
     <!-- User list -->

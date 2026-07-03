@@ -44,6 +44,7 @@ const kv = createClient({
 
 const VALID_ROLES = ['realtor', 'manager', 'admin'];
 const VALID_ACTIONS = ['deactivate', 'activate', 'set-role', 'delete'];
+const SOLE_ADMIN_USERNAME = 'daniel'; // must match api/staff/[action].js
 
 function parseCsv(text) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
@@ -149,10 +150,18 @@ async function main() {
     }
 
     if (action === 'delete') {
+      if (username === SOLE_ADMIN_USERNAME) {
+        results.push({ username, action, role: users[idx]?.role || '', status: `SKIPPED — "${SOLE_ADMIN_USERNAME}" cannot be removed` });
+        continue;
+      }
       users.splice(idx, 1);
       await revokeSessionsForUsername(username);
       results.push({ username, action, role: users[idx]?.role || '', status: 'DELETED' });
     } else if (action === 'deactivate') {
+      if (username === SOLE_ADMIN_USERNAME) {
+        results.push({ username, action, role: users[idx].role, status: `SKIPPED — "${SOLE_ADMIN_USERNAME}" cannot be deactivated` });
+        continue;
+      }
       users[idx].active = false;
       await revokeSessionsForUsername(username);
       results.push({ username, action, role: users[idx].role, status: 'DEACTIVATED' });
@@ -162,6 +171,14 @@ async function main() {
     } else if (action === 'set-role') {
       if (!VALID_ROLES.includes(role)) {
         results.push({ username, action, role, status: `SKIPPED — invalid role "${role}"` });
+        continue;
+      }
+      if (role === 'admin' && username !== SOLE_ADMIN_USERNAME) {
+        results.push({ username, action, role, status: `SKIPPED — only "${SOLE_ADMIN_USERNAME}" can be admin` });
+        continue;
+      }
+      if (username === SOLE_ADMIN_USERNAME && role !== 'admin') {
+        results.push({ username, action, role, status: `SKIPPED — "${SOLE_ADMIN_USERNAME}" must stay admin` });
         continue;
       }
       users[idx].role = role;
