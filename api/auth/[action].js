@@ -3,6 +3,7 @@
 // in a single Serverless Function (Vercel Hobby plan caps total functions at 12).
 import { handleCors } from '../_lib/cors.js';
 import { getUsers } from '../_lib/db.js';
+import { requireLicense } from '../_lib/license.js';
 import {
   verifyPassword,
   createSession,
@@ -16,6 +17,8 @@ const isProd = process.env.NODE_ENV === 'production';
 async function login(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
+    if (!(await requireLicense(res))) return;
+
     const { username, password } = req.body || {};
     if (!username || !password) {
       return res.status(400).json({ error: 'Username and password are required' });
@@ -24,6 +27,10 @@ async function login(req, res) {
     const users = await getUsers();
     const user = users.find((u) => u.username === username.trim().toLowerCase());
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
+
+    if (user.active === false) {
+      return res.status(403).json({ error: 'This account has been deactivated. Contact an admin.' });
+    }
 
     const ok = await verifyPassword(password, user.passwordHash);
     if (!ok) return res.status(401).json({ error: 'Invalid username or password' });

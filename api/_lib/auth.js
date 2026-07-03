@@ -2,6 +2,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { getSessions, saveSessions, getUsers } from './db.js';
+import { checkLicense } from './license.js';
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
@@ -62,6 +63,15 @@ export function parseSessionCookie(cookieHeader) {
 // account no longer exists (deleted since login), treat it the same as
 // an expired session rather than trusting stale cached values.
 export async function requireAuth(req, res) {
+  const license = await checkLicense();
+  if (!license.valid) {
+    res.status(402).json({
+      error: `Subscription inactive: ${license.reason || 'unknown reason'}. Please renew to continue using this app.`,
+      licenseInvalid: true,
+    });
+    return null;
+  }
+
   const token = parseSessionCookie(req.headers.cookie);
   const session = await lookupSession(token);
   if (!session) {
@@ -73,6 +83,10 @@ export async function requireAuth(req, res) {
   const user = users.find((u) => u.username === session.username);
   if (!user) {
     res.status(401).json({ error: 'Your account no longer exists. Please contact an admin.' });
+    return null;
+  }
+  if (user.active === false) {
+    res.status(403).json({ error: 'This account has been deactivated. Contact an admin.' });
     return null;
   }
 
