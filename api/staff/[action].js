@@ -4,14 +4,14 @@
 //
 // Public URLs are unchanged (mapped via vercel.json rewrites):
 //   GET    /api/staff                  -> action=manage  (list, admin only)
-//   POST   /api/staff                  -> action=manage  (create, admin only)
+//   POST   /api/staff                  -> action=manage  (create, admin or manager)
 //   PUT    /api/staff?username=...     -> action=manage  (edit, admin only)
 //   DELETE /api/staff?username=...     -> action=manage  (remove, admin only)
 //   GET    /api/setup?secret=...       -> action=setup   (one-time bootstrap)
 //   GET    /api/health                 -> action=health  (uptime ping)
 //   GET    /api/license                -> action=license (status, admin only)
 //   POST   /api/license                -> action=license (renew, admin only)
-//   POST   /api/staff/bulk             -> action=bulk (bulk create, admin only)
+//   POST   /api/staff/bulk             -> action=bulk (bulk create, admin or manager)
 //
 // NOTE: api/setup (action=setup) is a one-time bootstrap endpoint for
 // creating your first user accounts. The original file carried a reminder
@@ -103,8 +103,8 @@ async function license(req, res) {
 async function bulk(req, res) {
   const session = await requireAuth(req, res);
   if (!session) return;
-  if (session.role !== 'admin') {
-    return res.status(403).json({ error: 'Only admins can bulk-create staff accounts.' });
+  if (session.role !== 'admin' && session.role !== 'manager') {
+    return res.status(403).json({ error: 'Only admins and managers can bulk-create staff accounts.' });
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -191,7 +191,14 @@ async function manage(req, res) {
   const session = await requireAuth(req, res);
   if (!session) return;
 
-  if (session.role !== 'admin') {
+  // Managers may create new staff accounts, but viewing the full roster,
+  // editing existing accounts, or removing accounts stays admin-only.
+  const canCreate = session.role === 'admin' || session.role === 'manager';
+  if (req.method === 'POST') {
+    if (!canCreate) {
+      return res.status(403).json({ error: 'Only admins and managers can add staff accounts.' });
+    }
+  } else if (session.role !== 'admin') {
     return res.status(403).json({ error: 'Only admins can manage staff accounts.' });
   }
 

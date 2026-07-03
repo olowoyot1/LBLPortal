@@ -61,7 +61,7 @@ async function tryResumeSession() {
 function enterApp() {
   el('nav-user').textContent = `${currentUser.displayName} · ${currentUser.role}`;
   el('clear-log-btn').classList.toggle('hidden', currentUser.role === 'realtor');
-  el('tab-staff').classList.toggle('hidden', currentUser.role !== 'admin');
+  el('tab-staff').classList.toggle('hidden', currentUser.role !== 'admin' && currentUser.role !== 'manager');
   el('tab-subscription').classList.toggle('hidden', currentUser.role !== 'admin');
   el('login-screen').style.display = 'none';
   el('app').style.display = 'block';
@@ -572,11 +572,19 @@ async function exportCSV() {
   a.click();
 }
 
-// ── STAFF MANAGEMENT (admin only) ──
+// ── STAFF MANAGEMENT (admin: full access; manager: can add staff only) ──
 const SOLE_ADMIN_USERNAME = 'daniel'; // must match api/staff/[action].js
 let staffCache = [];
 
 async function renderStaff() {
+  if (currentUser.role === 'manager') {
+    el('staff-body').innerHTML = `<div class="log-empty">
+      You can add new staff using "+ Add Staff" or "Bulk Upload" above.
+      Viewing or editing the full staff list is admin-only.
+    </div>`;
+    return;
+  }
+
   el('staff-body').innerHTML = '<div class="log-empty"><span class="spinner"></span>Loading...</div>';
   try {
     const users = await api('/api/staff');
