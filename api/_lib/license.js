@@ -103,3 +103,41 @@ export async function requireLicense(res) {
   }
   return true;
 }
+
+// Read the raw license record plus a fresh validity check — used by the
+// admin-facing /api/license endpoint.
+export async function getLicenseStatus() {
+  const record = (await kv.get('license')) ?? null;
+  const validity = await checkLicense({ force: true });
+  return { record, ...validity };
+}
+
+// Create/renew the license record. Only reachable via /api/license (admin
+// only, bypasses the expired-license block) or scripts/setLicense.js.
+export async function renewLicense({ days, validUntil, status, plan } = {}) {
+  const current = (await kv.get('license')) ?? null;
+
+  let newValidUntil = current?.validUntil;
+  if (validUntil) {
+    newValidUntil = validUntil;
+  } else if (days) {
+    const n = Number(days);
+    if (!n || n <= 0) throw new Error('"days" must be a positive number.');
+    const d = new Date();
+    d.setDate(d.getDate() + n);
+    newValidUntil = d.toISOString().slice(0, 10);
+  } else if (!newValidUntil) {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    newValidUntil = d.toISOString().slice(0, 10);
+  }
+
+  const newStatus = status || current?.status || 'active';
+  const newPlan = plan || current?.plan || 'standard';
+
+  const license = { status: newStatus, validUntil: newValidUntil, plan: newPlan, updatedAt: new Date().toISOString() };
+  await kv.set('license', license);
+  await kv.del('license_cache');
+
+  return { license, ...(await checkLicense({ force: true })) };
+}

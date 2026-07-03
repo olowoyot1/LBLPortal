@@ -9,6 +9,8 @@
 //   DELETE /api/staff?username=...     -> action=manage  (remove, admin only)
 //   GET    /api/setup?secret=...       -> action=setup   (one-time bootstrap)
 //   GET    /api/health                 -> action=health  (uptime ping)
+//   GET    /api/license                -> action=license (status, admin only)
+//   POST   /api/license                -> action=license (renew, admin only)
 //
 // NOTE: api/setup (action=setup) is a one-time bootstrap endpoint for
 // creating your first user accounts. The original file carried a reminder
@@ -19,10 +21,58 @@ import bcrypt from 'bcryptjs';
 import { handleCors } from '../_lib/cors.js';
 import { requireAuth } from '../_lib/auth.js';
 import { getUsers, saveUsers } from '../_lib/db.js';
+import { getLicenseStatus, renewLicense } from '../_lib/license.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function isValidEmail(e) {
   return typeof e === 'string' && EMAIL_RE.test(e.trim());
+}
+
+async function license(req, res) {
+  const setupSecret = process.env.SETUP_SECRET;
+  const secretMatches = setupSecret && req.query.secret === setupSecret;
+
+  // Two ways in:
+  //   1. Logged-in admin (normal day-to-day renewal via the Subscription tab).
+  //   2. The same SETUP_SECRET used for /api/setup, passed as ?secret=... in
+  //      the URL — this exists purely so the very first activation (before
+  //      any admin account can even log in, since login itself is blocked
+  //      without a license) can be done from a browser address bar with no
+  //      terminal at all.
+  if (!secretMatches) {
+    const session = await requireAuth(req, res, { allowExpiredForAdmin: true });
+    if (!session) return;
+    if (session.role !== 'admin') {
+      return res.status(403).json({ error: 'Only admins can manage the subscription.' });
+    }
+  }
+
+  if (req.method === 'GET') {
+    // Secret + days/validUntil in the query string = renew via plain URL.
+    // Secret alone (or a logged-in admin with no body) = just show status.
+    const { days, validUntil, status, plan } = req.query;
+    if (secretMatches && (days || validUntil || status || plan)) {
+      try {
+        const result = await renewLicense({ days, validUntil, status, plan });
+        return res.json(result);
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+    return res.json(await getLicenseStatus());
+  }
+
+  if (req.method === 'POST') {
+    const { days, validUntil, status, plan } = req.body || {};
+    try {
+      const result = await renewLicense({ days, validUntil, status, plan });
+      return res.json(result);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
+
+  return res.status(405).json({ error: 'Method not allowed' });
 }
 
 async function manage(req, res) {
@@ -226,6 +276,7 @@ export default async function handler(req, res) {
     if (action === 'health') return health(req, res);
     if (action === 'setup') return await setup(req, res);
     if (action === 'manage') return await manage(req, res);
+    if (action === 'license') return await license(req, res);
     return res.status(404).json({ error: 'Not found' });
   } catch (err) {
     console.error(err);

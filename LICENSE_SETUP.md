@@ -4,6 +4,31 @@ The app now refuses to work (login blocked, all authenticated API calls blocked
 with a 402 response) unless a valid, unexpired license is present. There are
 two modes.
 
+## First-time activation with no terminal at all
+
+If `SETUP_SECRET` is already set in your Vercel project's environment
+variables (it's the same secret used for the one-time `/api/setup` user
+bootstrap endpoint), you can activate the license purely by visiting a URL in
+your browser — no CLI, no `vercel link`, nothing installed locally:
+
+```
+https://landblaze.oaatz.com/api/license?secret=YOUR_SETUP_SECRET&days=31
+```
+
+That grants 31 days from today. You'll see a JSON response confirming it.
+From then on, once you're able to log in as an admin, use the **Subscription**
+tab in the app itself to renew — see below.
+
+If you don't know whether `SETUP_SECRET` is set, check Vercel → your project
+→ **Settings** → **Environment Variables**.
+
+## Renewing from inside the app (day-to-day, after first activation)
+
+Any **admin** account can log in — even while the subscription is expired or
+missing entirely — and go to the **Subscription** tab to renew it (set an
+exact expiry date or extend by a number of days). Everyone else (managers,
+realtors) stays locked out until an admin renews it.
+
 ## Local mode (default — works out of the box)
 
 The license lives in this project's own Vercel KV, under the key `license`.

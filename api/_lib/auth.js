@@ -62,16 +62,7 @@ export function parseSessionCookie(cookieHeader) {
 // user's current record on top of the session on every request. If the
 // account no longer exists (deleted since login), treat it the same as
 // an expired session rather than trusting stale cached values.
-export async function requireAuth(req, res) {
-  const license = await checkLicense();
-  if (!license.valid) {
-    res.status(402).json({
-      error: `Subscription inactive: ${license.reason || 'unknown reason'}. Please renew to continue using this app.`,
-      licenseInvalid: true,
-    });
-    return null;
-  }
-
+export async function requireAuth(req, res, opts = {}) {
   const token = parseSessionCookie(req.headers.cookie);
   const session = await lookupSession(token);
   if (!session) {
@@ -90,10 +81,22 @@ export async function requireAuth(req, res) {
     return null;
   }
 
+  const license = await checkLicense();
+  const bypass = opts.allowExpiredForAdmin && user.role === 'admin';
+  if (!license.valid && !bypass) {
+    res.status(402).json({
+      error: `Subscription inactive: ${license.reason || 'unknown reason'}. Please renew to continue using this app.`,
+      licenseInvalid: true,
+    });
+    return null;
+  }
+
   return {
     ...session,
     displayName: user.displayName,
     email: user.email || '',
     role: user.role,
+    licenseValid: license.valid,
+    licenseReason: license.valid ? undefined : license.reason,
   };
 }

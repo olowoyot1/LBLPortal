@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 // Set or renew the app's license/subscription record (LOCAL MODE).
 //
+// NOTE: as of this version, an admin can also renew the subscription from
+// inside the app itself (Subscription tab, visible only to admin accounts —
+// works even while the current subscription is expired). This CLI script is
+// still useful for the very first activation (before any admin can log in)
+// or for scripting/automation.
+//
 // This only matters if you have NOT set LICENSE_SERVER_URL — see
 // api/_lib/license.js for the remote-mode explanation.
 //

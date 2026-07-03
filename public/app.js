@@ -62,8 +62,12 @@ function enterApp() {
   el('nav-user').textContent = `${currentUser.displayName} · ${currentUser.role}`;
   el('clear-log-btn').classList.toggle('hidden', currentUser.role === 'realtor');
   el('tab-staff').classList.toggle('hidden', currentUser.role !== 'admin');
+  el('tab-subscription').classList.toggle('hidden', currentUser.role !== 'admin');
   el('login-screen').style.display = 'none';
   el('app').style.display = 'block';
+  if (currentUser.role === 'admin' && currentUser.licenseValid === false) {
+    switchTab('subscription');
+  }
   renderLog();
 }
 
@@ -81,12 +85,13 @@ let S = { custType: null, txType: null, customer: null, salesOrder: null, newCus
 
 // ── tabs ──
 function switchTab(t) {
-  ['payment', 'log', 'staff'].forEach((x) => {
+  ['payment', 'log', 'staff', 'subscription'].forEach((x) => {
     el('tab-' + x)?.classList.toggle('active', x === t);
     el('view-' + x)?.classList.toggle('active', x === t);
   });
   if (t === 'log') renderLog();
   if (t === 'staff') renderStaff();
+  if (t === 'subscription') renderSubscription();
 }
 
 // ── steps ──
@@ -710,6 +715,53 @@ async function deleteUser(username) {
   } catch (e) {
     alert(e.message);
   }
+}
+
+// ── subscription (admin only) ──
+async function renderSubscription() {
+  el('sub-status').innerHTML = '<span class="spinner"></span>Loading...';
+  try {
+    const data = await api('/api/license');
+    const rec = data.record;
+    if (!rec) {
+      el('sub-status').innerHTML = `<div style="color:var(--red)">No subscription on file yet. Set one below to activate the app.</div>`;
+      return;
+    }
+    const color = data.valid ? 'var(--green, #4caf50)' : 'var(--red)';
+    const statusLine = data.valid
+      ? `Active — valid until <strong>${escapeHtml(rec.validUntil)}</strong> (${escapeHtml(rec.plan)} plan)`
+      : `Inactive — ${escapeHtml(data.reason || 'expired')}`;
+    el('sub-status').innerHTML = `<div style="color:${color}">${statusLine}</div>
+      <div style="color:var(--muted);font-size:12px;margin-top:0.35rem">Last updated ${escapeHtml(rec.updatedAt || '')}</div>`;
+    el('sub-until').value = rec.validUntil || '';
+  } catch (e) {
+    el('sub-status').innerHTML = `<div style="color:var(--red)">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function submitRenewLicense() {
+  const btn = el('sub-submit');
+  el('sub-error').classList.add('hidden');
+  const days = el('sub-days').value.trim();
+  const until = el('sub-until').value.trim();
+  if (!days && !until) {
+    el('sub-error').textContent = 'Enter a number of days or pick an exact expiry date.';
+    el('sub-error').classList.remove('hidden');
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Renewing...';
+  try {
+    const body = {};
+    if (days) body.days = Number(days);
+    if (until) body.validUntil = until;
+    await api('/api/license', { method: 'POST', body: JSON.stringify(body) });
+    el('sub-days').value = '';
+    renderSubscription();
+  } catch (e) {
+    el('sub-error').textContent = e.message;
+    el('sub-error').classList.remove('hidden');
+  }
+  btn.disabled = false; btn.textContent = 'Renew Subscription';
 }
 
 // ── init ──

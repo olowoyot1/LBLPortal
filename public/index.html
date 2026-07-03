@@ -374,6 +374,7 @@ a{color:var(--gold);text-decoration:none}
       <button class="nav-tab active" id="tab-payment" onclick="switchTab('payment')">New Payment</button>
       <button class="nav-tab" id="tab-log" onclick="switchTab('log')">Transaction Log</button>
       <button class="nav-tab hidden" id="tab-staff" onclick="switchTab('staff')">Staff</button>
+      <button class="nav-tab hidden" id="tab-subscription" onclick="switchTab('subscription')">Subscription</button>
     </div>
     <div class="nav-right">
       <span class="nav-user" id="nav-user"></span>
@@ -607,6 +608,34 @@ a{color:var(--gold);text-decoration:none}
     <!-- User list -->
     <div class="log-card">
       <div id="staff-body"><div class="log-empty">Loading...</div></div>
+    </div>
+  </div>
+
+  <!-- SUBSCRIPTION VIEW -->
+  <div class="view" id="view-subscription">
+    <div class="log-header">
+      <h2>Subscription</h2>
+    </div>
+    <div class="log-card" style="padding:1rem 1.25rem">
+      <div id="sub-status" class="log-empty">Loading...</div>
+
+      <div style="margin-top:1.25rem;border-top:1px solid var(--border,#2a2a2a);padding-top:1.25rem">
+        <div class="card-title" style="margin-bottom:0.75rem">Renew</div>
+        <div class="grid2">
+          <div class="form-row">
+            <label>Extend by (days)</label>
+            <input type="number" id="sub-days" placeholder="e.g. 31" min="1" />
+          </div>
+          <div class="form-row">
+            <label>Or set exact expiry date</label>
+            <input type="date" id="sub-until" />
+          </div>
+        </div>
+        <div id="sub-error" class="hidden" style="color:var(--red);font-size:12px;margin:0.5rem 0"></div>
+        <div class="action-bar" style="margin-top:0.5rem">
+          <button class="btn-next" id="sub-submit" onclick="submitRenewLicense()">Renew Subscription</button>
+        </div>
+      </div>
     </div>
   </div>
 
