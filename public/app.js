@@ -134,7 +134,7 @@ async function searchCustomer() {
         <div class="result-item" id="cr-${c.customer_id}" data-customer='${JSON.stringify(c).replace(/'/g, "&#39;")}' onclick="selectCustomerFromEl(this)">
           <div>
             <div class="r-name">${escapeHtml(c.customer_name)}</div>
-            <div class="r-meta">${escapeHtml(c.email || 'No email')}${c.phone ? ' · ' + escapeHtml(c.phone) : ''}</div>
+            <div class="r-meta">${escapeHtml(c.email || 'No email')}${c.phone ? ' · ' + escapeHtml(c.phone) : ''}${c.contact_number ? ' · ' + escapeHtml(c.contact_number) : ''}</div>
           </div>
           <span style="color:var(--muted)">›</span>
         </div>`).join('');

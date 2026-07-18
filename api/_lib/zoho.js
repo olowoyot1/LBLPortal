@@ -149,29 +149,48 @@ export async function listBankAccounts() {
 
 // ── Contacts ──
 
-export async function searchContacts(name) {
+export async function searchContacts(term) {
   // NOTE: Zoho Books ignores contact_name_contains whenever filter_by is
   // also present in the same request — it silently falls back to
   // returning contacts matched only by filter_by (i.e. every active
   // contact), regardless of what was typed. So we can't ask Zoho to
-  // filter by status and name at the same time. Instead we fetch a wider
-  // page of name matches (any status) and drop inactive ones ourselves,
-  // then trim back down to the usual result size.
-  const data = await zohoRequest('get', '/contacts', {
-    params: {
-      contact_name_contains: name,
-      contact_type: 'customer',
-      per_page: 25,
-    },
-  });
-  return (data.contacts || [])
-    .filter((c) => (c.status || '').toLowerCase() === 'active')
-    .slice(0, 6)
+  // filter by status and name at the same time; we drop inactive results
+  // ourselves below instead.
+  //
+  // The realtor may type a name, an email, a phone number, or the
+  // Zoho-generated customer number (e.g. "LBC00431") into the single
+  // search box, and any of those should find the customer. Zoho's
+  // contacts list endpoint only matches ONE field per request — there's
+  // no OR-across-fields query — so we fire one lookup per field in
+  // parallel and merge the results. contact_number_contains isn't
+  // documented as reliably as the others, so it's wrapped so a failure
+  // there doesn't take down the rest of the search.
+  const baseParams = { contact_type: 'customer', per_page: 10 };
+  const searches = [
+    zohoRequest('get', '/contacts', { params: { ...baseParams, contact_name_contains: term } }),
+    zohoRequest('get', '/contacts', { params: { ...baseParams, email_contains: term } }),
+    zohoRequest('get', '/contacts', { params: { ...baseParams, phone_contains: term } }),
+    zohoRequest('get', '/contacts', { params: { ...baseParams, contact_number_contains: term } })
+      .catch(() => ({ contacts: [] })),
+  ];
+
+  const results = await Promise.all(searches);
+  const merged = new Map();
+  for (const data of results) {
+    for (const c of data.contacts || []) {
+      if ((c.status || '').toLowerCase() !== 'active') continue;
+      if (!merged.has(c.contact_id)) merged.set(c.contact_id, c);
+    }
+  }
+
+  return Array.from(merged.values())
+    .slice(0, 8)
     .map((c) => ({
       customer_id: c.contact_id,
       customer_name: c.contact_name,
       email: c.email,
       phone: c.phone,
+      contact_number: c.contact_number || '',
     }));
 }
 
