@@ -19,7 +19,7 @@ export default async function handler(req, res) {
     const {
       custType, txType, customer, newCust, salesOrder,
       propDesc, plotSize, item, fullPrice, amtPaid, payDate, payMode,
-      bankAccount, payRef, salesperson, notes,
+      bankAccount, salesperson, notes,
     } = req.body || {};
 
     if (!txType || !amtPaid || !payDate) {
@@ -75,7 +75,6 @@ export default async function handler(req, res) {
       paymentMode: payMode || 'banktransfer',
       accountId: bankAccount?.account_id,
       date: payDate,
-      referenceNumber: payRef,
       description,
     });
 
@@ -94,7 +93,7 @@ export default async function handler(req, res) {
     let contractCode = null;
 
     if (txType === 'outright') {
-      const notesText = `Full payment received. ${payMode}${payRef ? ' Ref: ' + payRef : ''}${notes ? ' — ' + notes : ''}`;
+      const notesText = `Full payment received. ${payMode}${notes ? ' — ' + notes : ''}`;
       const invoice = await zoho.createInvoice({
         customerId, date: payDate, itemId: item?.item_id, lineItemName: itemLabel, rate: Number(fullPrice), notes: notesText, salesperson,
       });
@@ -135,7 +134,7 @@ export default async function handler(req, res) {
       }
 
     } else if (txType === 'installment') {
-      const notesText = `Installment plan. Initial deposit NGN ${Number(amtPaid).toLocaleString()} on ${payDate} via ${payMode}${payRef ? ' Ref: ' + payRef : ''}${notes ? ' — ' + notes : ''}`;
+      const notesText = `Installment plan. Initial deposit NGN ${Number(amtPaid).toLocaleString()} on ${payDate} via ${payMode}${notes ? ' — ' + notes : ''}`;
       const so = await zoho.createSalesOrder({
         customerId, date: payDate, itemId: item?.item_id, lineItemName: itemLabel, rate: Number(fullPrice), notes: notesText, salesperson,
       });
@@ -200,7 +199,7 @@ export default async function handler(req, res) {
 
       const { html } = buildPaymentHistoryTable({
         priorPayments,
-        newPayment: { date: payDate, amount: Number(amtPaid), mode: payMode, ref: payRef },
+        newPayment: { date: payDate, amount: Number(amtPaid), mode: payMode },
         contractTotal: Number(salesOrder.total),
         soNumber: salesOrder.salesorder_number,
       });
@@ -240,7 +239,6 @@ export default async function handler(req, res) {
       fullPrice: Number(fullPrice || 0),
       payMode,
       bankAccountName: bankAccount?.account_name || '',
-      payRef: payRef || '',
       docType,
       docId,
       docNumber,

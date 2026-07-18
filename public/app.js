@@ -343,7 +343,7 @@ function goStep4() {
     bankAccount = accounts.find((a) => a.account_id === bankSel.value) || { account_id: bankSel.value };
   }
 
-  S.payment = { amtPaid: amt, payDate: date, payMode, payRef: el('pay-ref').value.trim(), salesperson: el('salesperson').value.trim(), notes: el('pay-notes').value.trim() };
+  S.payment = { amtPaid: amt, payDate: date, payMode, salesperson: el('salesperson').value.trim(), notes: el('pay-notes').value.trim() };
   S.prop = { propDesc, plotSize, fullPrice };
   S.bankAccount = bankAccount;
 
@@ -358,7 +358,7 @@ function goStep4() {
     <div class="s-row"><div class="s-icon ok">🏷</div><div><div class="s-label">${txLabels[S.txType]}</div><div class="s-sub">${escapeHtml(propDesc)}${plotSize ? ' · ' + escapeHtml(plotSize) : ''}</div></div></div>
     ${!isTopup ? `<div class="s-row"><div class="s-icon ok">📊</div><div><div class="s-label">Full property value</div><div class="s-sub">${fmt(fullPrice)}</div></div></div>` : ''}
     ${isTopup ? `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Sales Order: ${escapeHtml(S.salesOrder.salesorder_number)}</div><div class="s-sub">Balance before this payment: ${fmt(S.salesOrder.balance_due ?? S.salesOrder.total)}</div></div></div>` : ''}
-    <div class="s-row"><div class="s-icon ok">💰</div><div><div class="s-label">Amount Paid: ${fmt(amt)}</div><div class="s-sub">${modeLabel(S.payment.payMode)}${bankAccount ? ' · ' + escapeHtml(bankAccount.account_name || '') : ''}${S.payment.payRef ? ' · Ref: ' + escapeHtml(S.payment.payRef) : ''} · ${date}</div></div></div>
+    <div class="s-row"><div class="s-icon ok">💰</div><div><div class="s-label">Amount Paid: ${fmt(amt)}</div><div class="s-sub">${modeLabel(S.payment.payMode)}${bankAccount ? ' · ' + escapeHtml(bankAccount.account_name || '') : ''} · ${date}</div></div></div>
     ${S.payment.salesperson ? `<div class="s-row"><div class="s-icon ok">👔</div><div><div class="s-label">Realtor</div><div class="s-sub">${escapeHtml(S.payment.salesperson)}</div></div></div>` : ''}
     <div class="s-row"><div class="s-icon ok">📝</div><div><div class="s-label">Documents to be created &amp; sent</div><div class="s-sub">${docsText[S.txType]}</div></div></div>
   `;
@@ -385,7 +385,6 @@ async function processPayment() {
     payDate: S.payment.payDate,
     payMode: S.payment.payMode,
     bankAccount: S.bankAccount,
-    payRef: S.payment.payRef,
     salesperson: S.payment.salesperson,
     notes: S.payment.notes
   };
@@ -404,7 +403,7 @@ async function processPayment() {
         <div style="font-size:11px;color:var(--muted);margin-top:4px">${new Date(result.timestamp).toLocaleString('en-NG')} · ${escapeHtml(result.realtor)}</div>
       </div>
       <div class="s-row"><div class="s-icon ok">👤</div><div><div class="s-label">${escapeHtml(result.custName)}</div><div class="s-sub">${result.custCreated ? 'New customer created · ' : ''}ID: ${escapeHtml(result.custId)}</div></div></div>
-      <div class="s-row"><div class="s-icon ok">🧾</div><div><div class="s-label">Payment receipt recorded &amp; verified</div><div class="s-sub">${fmt(result.amtPaid)} · ${modeLabel(result.payMode)}${result.bankAccountName ? ' · ' + escapeHtml(result.bankAccountName) : ''}${result.payRef ? ' · Ref: ' + escapeHtml(result.payRef) : ''}</div><span class="doc-chip">${escapeHtml(result.paymentId)}</span></div></div>
+      <div class="s-row"><div class="s-icon ok">🧾</div><div><div class="s-label">Payment receipt recorded &amp; verified</div><div class="s-sub">${fmt(result.amtPaid)} · ${modeLabel(result.payMode)}${result.bankAccountName ? ' · ' + escapeHtml(result.bankAccountName) : ''}</div><span class="doc-chip">${escapeHtml(result.paymentId)}</span></div></div>
       ${result.docType !== 'receipt_only'
         ? `<div class="s-row"><div class="s-icon ok">📄</div><div><div class="s-label">${docLabels[result.docType]} sent to customer &amp; verified</div>${result.docType === 'sales_order' ? `<div class="s-sub">Full contract: ${fmt(result.fullPrice)}</div>` : ''}<span class="doc-chip">${escapeHtml(result.docNumber || result.docId)}</span></div></div>`
         : `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Top-up applied to ${escapeHtml(result.soNumber || '')}</div><div class="s-sub">Remaining balance: ${fmt(result.soRemainingBalance ?? 0)}</div></div></div>`}
@@ -425,7 +424,7 @@ function resetPayment() {
   hide('existing-search'); hide('new-cust-form'); hide('so-picker');
   el('next1').disabled = true;
   el('search-name').value = ''; el('search-results').innerHTML = ''; el('so-list').innerHTML = ''; el('item-results').innerHTML = '';
-  ['new-name', 'new-email', 'new-phone', 'new-address', 'prop-desc', 'plot-size', 'full-price', 'amount-paid', 'pay-ref', 'salesperson', 'pay-notes'].forEach((id) => { if (el(id)) el(id).value = ''; });
+  ['new-name', 'new-email', 'new-phone', 'new-address', 'prop-desc', 'plot-size', 'full-price', 'amount-paid', 'salesperson', 'pay-notes'].forEach((id) => { if (el(id)) el(id).value = ''; });
   setStep(1);
 }
 
@@ -503,7 +502,6 @@ function openTxDetail(transactionId) {
     ${row('Amount Paid', fmt(tx.amtPaid))}
     ${tx.fullPrice ? row('Full Price', fmt(tx.fullPrice)) : ''}
     ${row('Payment Mode', modeLabel(tx.payMode) + (tx.bankAccountName ? ' · ' + escapeHtml(tx.bankAccountName) : ''))}
-    ${row('Payment Reference', tx.payRef ? escapeHtml(tx.payRef) : '')}
     ${row('Document', (docLabels[tx.docType] || tx.docType) + ': ' + escapeHtml(tx.docNumber || tx.paymentId || '—'))}
     ${tx.soNumber ? row('Linked Sales Order', escapeHtml(tx.soNumber)) : ''}
     ${row('Contract Code', tx.contractCode ? `<span style="font-family:'DM Mono',monospace">${escapeHtml(tx.contractCode)}</span>` : '<span style="color:var(--muted)">Not generated</span>')}
@@ -557,12 +555,12 @@ async function exportCSV() {
   let log = [];
   try { log = await api('/api/transactions'); } catch (e) { alert(e.message); return; }
   if (!log.length) { alert('No transactions to export.'); return; }
-  const headers = ['Timestamp', 'Realtor', 'Customer', 'Customer ID', 'Customer Email', 'New Customer', 'Tx Type', 'Property', 'Amount Paid', 'Full Price', 'Payment Mode', 'Bank Account', 'Reference', 'Document Type', 'Document Number', 'Payment ID', 'SO Number', 'Emailed'];
+  const headers = ['Timestamp', 'Realtor', 'Customer', 'Customer ID', 'Customer Email', 'New Customer', 'Tx Type', 'Property', 'Amount Paid', 'Full Price', 'Payment Mode', 'Bank Account', 'Document Type', 'Document Number', 'Payment ID', 'SO Number', 'Emailed'];
   const rows = log.map((e) => [
     new Date(e.timestamp).toLocaleString('en-NG'),
     e.realtor, e.custName, e.custId, e.custEmail || '', e.custCreated ? 'Yes' : 'No',
     e.txType, e.propDesc || '', e.amtPaid, e.fullPrice || '',
-    modeLabel(e.payMode), e.bankAccountName || '', e.payRef || '', e.docType || '',
+    modeLabel(e.payMode), e.bankAccountName || '', e.docType || '',
     e.docNumber || '', e.paymentId || '', e.soNumber || '', e.emailSent ? 'Yes' : 'No'
   ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
   const csv = [headers.join(','), ...rows].join('\n');

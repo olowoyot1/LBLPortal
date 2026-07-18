@@ -144,7 +144,12 @@ export async function listBankAccounts() {
 
 export async function searchContacts(name) {
   const data = await zohoRequest('get', '/contacts', {
-    params: { contact_name_contains: name, contact_type: 'customer', per_page: 6 },
+    params: {
+      contact_name_contains: name,
+      contact_type: 'customer',
+      filter_by: 'Status.Active',
+      per_page: 6,
+    },
   });
   return (data.contacts || []).map((c) => ({
     customer_id: c.contact_id,

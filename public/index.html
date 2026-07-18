@@ -524,21 +524,15 @@ a{color:var(--gold);text-decoration:none}
             <input type="date" id="pay-date"/>
           </div>
         </div>
-        <div class="grid2">
-          <div class="form-row">
-            <label>Payment Mode</label>
-            <select id="pay-mode" onchange="onPayModeChange()">
-              <option value="banktransfer">Bank Transfer</option>
-              <option value="cash">Cash</option>
-              <option value="creditcard">Credit Card</option>
-              <option value="cheque">Cheque</option>
-              <option value="others">Others</option>
-            </select>
-          </div>
-          <div class="form-row">
-            <label>Reference Number</label>
-            <input type="text" id="pay-ref" placeholder="TRF2026001"/>
-          </div>
+        <div class="form-row">
+          <label>Payment Mode</label>
+          <select id="pay-mode" onchange="onPayModeChange()">
+            <option value="banktransfer">Bank Transfer</option>
+            <option value="cash">Cash</option>
+            <option value="creditcard">Credit Card</option>
+            <option value="cheque">Cheque</option>
+            <option value="others">Others</option>
+          </select>
         </div>
         <div class="form-row" id="bank-account-row">
           <label>Deposited Into (Bank Account) *</label>

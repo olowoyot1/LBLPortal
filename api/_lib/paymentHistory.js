@@ -25,7 +25,7 @@ const MODE_LABELS = {
  *
  * @param {Object} params
  * @param {Array}  params.priorPayments    transaction log entries already recorded against this SO (oldest first)
- * @param {Object} params.newPayment       the payment just processed: { date, amount, mode, ref }
+ * @param {Object} params.newPayment       the payment just processed: { date, amount, mode }
  * @param {number} params.contractTotal    full contract value for this sales order
  * @param {string} [params.soNumber]
  * @returns {{ html: string, totalPaid: number, remainingBalance: number }}
@@ -36,13 +36,11 @@ export function buildPaymentHistoryTable({ priorPayments = [], newPayment, contr
       date: t.timestamp || t.payDate,
       amount: Number(t.amtPaid) || 0,
       mode: t.payMode,
-      ref: t.payRef || '',
     })),
     {
       date: newPayment.date,
       amount: Number(newPayment.amount) || 0,
       mode: newPayment.mode,
-      ref: newPayment.ref || '',
       isNew: true,
     },
   ].sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -57,7 +55,6 @@ export function buildPaymentHistoryTable({ priorPayments = [], newPayment, contr
       <tr style="background:${rowBg};">
         <td style="padding:10px 12px;border-bottom:1px solid #EEE;font-size:13px;color:#333;">${fmtDate(r.date)}</td>
         <td style="padding:10px 12px;border-bottom:1px solid #EEE;font-size:13px;color:#333;">${MODE_LABELS[r.mode] || r.mode || '—'}</td>
-        <td style="padding:10px 12px;border-bottom:1px solid #EEE;font-size:13px;color:#333;">${r.ref || '&mdash;'}</td>
         <td style="padding:10px 12px;border-bottom:1px solid #EEE;font-size:13px;color:#1a7a3c;text-align:right;font-weight:600;">${ngn(r.amount)}${rowLabel}</td>
         <td style="padding:10px 12px;border-bottom:1px solid #EEE;font-size:13px;color:#333;text-align:right;">${ngn(balance)}</td>
       </tr>`;
@@ -76,7 +73,6 @@ export function buildPaymentHistoryTable({ priorPayments = [], newPayment, contr
         <tr style="background:#1F2937;">
           <th style="padding:10px 12px;text-align:left;font-size:12px;color:#FFFFFF;font-weight:600;">Date</th>
           <th style="padding:10px 12px;text-align:left;font-size:12px;color:#FFFFFF;font-weight:600;">Mode</th>
-          <th style="padding:10px 12px;text-align:left;font-size:12px;color:#FFFFFF;font-weight:600;">Reference</th>
           <th style="padding:10px 12px;text-align:right;font-size:12px;color:#FFFFFF;font-weight:600;">Amount Paid</th>
           <th style="padding:10px 12px;text-align:right;font-size:12px;color:#FFFFFF;font-weight:600;">Balance Remaining</th>
         </tr>
@@ -86,7 +82,7 @@ export function buildPaymentHistoryTable({ priorPayments = [], newPayment, contr
       </tbody>
       <tfoot>
         <tr style="background:#F9FAFB;">
-          <td colspan="3" style="padding:10px 12px;font-size:13px;font-weight:700;color:#222;">Total Paid to Date</td>
+          <td colspan="2" style="padding:10px 12px;font-size:13px;font-weight:700;color:#222;">Total Paid to Date</td>
           <td style="padding:10px 12px;font-size:13px;font-weight:700;color:#1a7a3c;text-align:right;">${ngn(totalPaid)}</td>
           <td style="padding:10px 12px;font-size:13px;font-weight:700;color:#B22222;text-align:right;">${ngn(remainingBalance)}</td>
         </tr>
