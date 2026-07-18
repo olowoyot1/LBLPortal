@@ -93,16 +93,23 @@ async function zohoUpload(endpoint, formData, { params = {} } = {}) {
 // ── Items ──
 
 export async function searchItems(name) {
+  // Same Zoho quirk as searchContacts: filter_by combined with
+  // name_contains causes Zoho to ignore the name filter and return every
+  // active item instead. Fetch by name only, then drop inactive items
+  // ourselves.
   const data = await zohoRequest('get', '/items', {
-    params: { name_contains: name, filter_by: 'Status.Active', per_page: 10 },
+    params: { name_contains: name, per_page: 25 },
   });
-  return (data.items || []).map((i) => ({
-    item_id: i.item_id,
-    name: i.name,
-    rate: i.rate,
-    description: i.description || '',
-    unit: i.unit || '',
-  }));
+  return (data.items || [])
+    .filter((i) => (i.status || '').toLowerCase() === 'active')
+    .slice(0, 10)
+    .map((i) => ({
+      item_id: i.item_id,
+      name: i.name,
+      rate: i.rate,
+      description: i.description || '',
+      unit: i.unit || '',
+    }));
 }
 
 export async function listItems() {
@@ -143,20 +150,29 @@ export async function listBankAccounts() {
 // ── Contacts ──
 
 export async function searchContacts(name) {
+  // NOTE: Zoho Books ignores contact_name_contains whenever filter_by is
+  // also present in the same request — it silently falls back to
+  // returning contacts matched only by filter_by (i.e. every active
+  // contact), regardless of what was typed. So we can't ask Zoho to
+  // filter by status and name at the same time. Instead we fetch a wider
+  // page of name matches (any status) and drop inactive ones ourselves,
+  // then trim back down to the usual result size.
   const data = await zohoRequest('get', '/contacts', {
     params: {
       contact_name_contains: name,
       contact_type: 'customer',
-      filter_by: 'Status.Active',
-      per_page: 6,
+      per_page: 25,
     },
   });
-  return (data.contacts || []).map((c) => ({
-    customer_id: c.contact_id,
-    customer_name: c.contact_name,
-    email: c.email,
-    phone: c.phone,
-  }));
+  return (data.contacts || [])
+    .filter((c) => (c.status || '').toLowerCase() === 'active')
+    .slice(0, 6)
+    .map((c) => ({
+      customer_id: c.contact_id,
+      customer_name: c.contact_name,
+      email: c.email,
+      phone: c.phone,
+    }));
 }
 
 // Used by the contract generator to pull an existing customer's billing
