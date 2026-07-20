@@ -109,6 +109,12 @@ a{color:var(--gold);text-decoration:none}
 .form-row input::placeholder{color:#2a2a2a}
 .form-row select option{background:var(--surface)}
 .form-row input:disabled{opacity:0.5;cursor:not-allowed}
+.form-row input[type="checkbox"]{
+  width:16px;height:16px;flex:0 0 16px;min-width:16px;
+  appearance:auto;-webkit-appearance:checkbox;-moz-appearance:checkbox;
+  background:none;padding:0;border:none;border-radius:0;
+  accent-color:var(--gold);cursor:pointer;
+}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
 /* SEGMENT BUTTONS */
@@ -554,7 +560,7 @@ a{color:var(--gold);text-decoration:none}
           <input type="text" id="pay-notes" placeholder="Any additional info..."/>
         </div>
         <div class="form-row" style="display:flex;align-items:flex-start;gap:8px">
-          <input type="checkbox" id="final-payment-toggle" style="width:auto;margin:3px 0 0"/>
+          <input type="checkbox" id="final-payment-toggle"/>
           <div>
             <label for="final-payment-toggle" style="margin:0;cursor:pointer;display:inline">This is the FINAL payment for this property</label>
             <div style="font-size:11px;color:var(--muted);margin-top:2px">Outright purchases are always final. For top-ups/installments this is normally detected automatically once the balance reaches zero — tick this to force it (e.g. a final cash settlement) so the Contract of Sale &amp; Deed of Assignment go out immediately, regardless of the transaction type.</div>
