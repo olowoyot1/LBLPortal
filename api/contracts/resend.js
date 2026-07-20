@@ -134,6 +134,7 @@ export default async function handler(req, res) {
         considerationAmount: tx.fullPrice,
         documentNumber: tx.docNumber,
         contractCode,
+        deedDate: tx.timestamp,
       });
       await attachDeed({ docKind, docId: tx.docId, deedPdf });
       docsSent.push('Deed of Conveyance');

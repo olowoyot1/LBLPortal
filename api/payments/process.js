@@ -143,7 +143,7 @@ export default async function handler(req, res) {
         const deedPdf = await buildDeedOfAssignmentPdf({
           customerName, customerAddress, propertyDescription: itemLabel, plotSize,
           considerationAmount: Number(fullPrice),
-          documentNumber: invoice.invoice_number, contractCode,
+          documentNumber: invoice.invoice_number, contractCode, deedDate: payDate,
         });
         await attachDeed({ docKind: 'invoice', docId: invoice.invoice_id, deedPdf });
         docsSent.push('Deed of Conveyance');
@@ -199,7 +199,7 @@ export default async function handler(req, res) {
           const deedPdf = await buildDeedOfAssignmentPdf({
             customerName, customerAddress, propertyDescription: itemLabel, plotSize,
             considerationAmount: Number(fullPrice),
-            documentNumber: so.salesorder_number, contractCode,
+            documentNumber: so.salesorder_number, contractCode, deedDate: payDate,
           });
           await attachDeed({ docKind: 'salesorder', docId: so.salesorder_id, deedPdf });
           docsSent.push('Deed of Conveyance');
@@ -302,6 +302,7 @@ export default async function handler(req, res) {
             considerationAmount: Number(salesOrder.total),
             documentNumber: salesOrder.salesorder_number,
             contractCode: finalContractCode,
+            deedDate: payDate,
           });
           await attachDeed({ docKind: 'salesorder', docId: salesOrder.salesorder_id, deedPdf });
           docsSent.push('Deed of Conveyance');

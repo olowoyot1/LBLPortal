@@ -12,6 +12,11 @@
 // for only calling buildDeedOfAssignmentPdf() when the payment in question
 // is the final one.
 import PDFKit from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VENDOR_NAME = 'LANDBLAZE LIMITED';
 // NOTE: this is the address used on Landblaze's own Deed of Conveyance
@@ -29,6 +34,19 @@ const PREPARED_BY = [
   'EGBEDA, LAGOS',
 ];
 
+// Same signature file used by the Contract of Sale (api/_lib/contract.js)
+// — stamped automatically on the Vendor's line. Missing gracefully: if the
+// file isn't present, the deed still generates correctly with a blank
+// line for manual signing, just like before.
+const SIGNATURE_PATH = path.join(__dirname, 'assets', 'vendor-signature.png');
+function loadVendorSignature() {
+  try {
+    return fs.readFileSync(SIGNATURE_PATH);
+  } catch (e) {
+    return null;
+  }
+}
+
 function ngn(n) {
   return 'NGN ' + Number(n || 0).toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -36,6 +54,23 @@ function ngn(n) {
 function fmtDate(d) {
   const date = d ? new Date(d) : new Date();
   return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+function ordinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+// Breaks a date into the day/month/year pieces used to fill in the deed's
+// "DATED THIS ___ DAY OF ___, 20___" style blanks.
+function dateParts(d) {
+  const date = d ? new Date(d) : new Date();
+  return {
+    day: ordinal(date.getDate()),
+    month: date.toLocaleDateString('en-GB', { month: 'long' }),
+    year: date.getFullYear(),
+  };
 }
 
 // ── Number → words (Naira) ──
@@ -89,6 +124,7 @@ function numberToWords(num) {
  * @param {number} params.considerationAmount   the full/final consideration paid for the property
  * @param {string} [params.documentNumber]      invoice/sales order number, shown for reference
  * @param {string} [params.contractCode]        app-generated reference code, e.g. LBL-2026-0001
+ * @param {string|Date} [params.deedDate]       date the deed carries — should be the date of the FINAL payment that completed the sale
  * @returns {Promise<Buffer>}
  */
 export function buildDeedOfAssignmentPdf({
@@ -99,6 +135,7 @@ export function buildDeedOfAssignmentPdf({
   considerationAmount,
   documentNumber,
   contractCode,
+  deedDate,
 }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFKit({ size: 'A4', margins: { top: 56, bottom: 56, left: 64, right: 64 }, bufferPages: true });
@@ -113,6 +150,7 @@ export function buildDeedOfAssignmentPdf({
     const propDesc = (propertyDescription || 'the property').trim();
     const size = (plotSize || '').trim();
     const amount = Number(considerationAmount || 0);
+    const { day, month, year } = dateParts(deedDate);
 
     const center = (text, opts = {}) => doc.text(text, { align: 'center', ...opts });
     const para = (text, opts = {}) => doc.text(text, { align: 'justify', ...opts });
@@ -162,7 +200,7 @@ export function buildDeedOfAssignmentPdf({
     spacer(18);
 
     doc.font('Helvetica').fontSize(10);
-    center('DATED THIS _____ DAY OF _______________, 20_____.');
+    center(`DATED THIS ${day} DAY OF ${month.toUpperCase()}, ${year}.`);
     spacer(30);
 
     doc.font('Helvetica-Bold').fontSize(9);
@@ -173,7 +211,7 @@ export function buildDeedOfAssignmentPdf({
     // ── Page 2: recitals ──
     doc.addPage();
     doc.font('Helvetica-Bold').fontSize(12);
-    para('THIS DEED OF CONVEYANCE is made this _____ day of _______________, 20_____,', { width: PAGE_WIDTH });
+    para(`THIS DEED OF CONVEYANCE is made this ${day} day of ${month}, ${year},`, { width: PAGE_WIDTH });
     spacer(16);
 
     doc.font('Helvetica-Bold').fontSize(11).text('BY AND BETWEEN:', { width: PAGE_WIDTH });
@@ -241,8 +279,27 @@ export function buildDeedOfAssignmentPdf({
 
     center('SIGNED, SEALED, AND DELIVERED');
     center(`BY THE VENDOR (${VENDOR_NAME}):`);
-    spacer(40);
-    center('.......................................................');
+    spacer(10);
+
+    const signatureImg = loadVendorSignature();
+    const sigWidth = 180;
+    const sigHeight = 40;
+    const sigX = doc.page.margins.left + (PAGE_WIDTH - sigWidth) / 2;
+    const sigY = doc.y;
+    if (signatureImg) {
+      try {
+        doc.image(signatureImg, sigX, sigY, { fit: [sigWidth, sigHeight] });
+        doc.y = sigY + sigHeight + 4;
+      } catch (e) {
+        // Corrupt/unsupported image file — fall back to a blank line
+        // rather than failing the whole deed generation.
+        spacer(30);
+        center('.......................................................');
+      }
+    } else {
+      spacer(30);
+      center('.......................................................');
+    }
     center('DIRECTOR');
     spacer(24);
 
