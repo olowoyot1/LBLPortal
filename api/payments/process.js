@@ -5,8 +5,10 @@ import { requireAuth } from '../_lib/auth.js';
 import { getTransactions, saveTransactions } from '../_lib/db.js';
 import * as zoho from '../_lib/zoho.js';
 import { buildContractPdf } from '../_lib/contract.js';
+import { buildDeedOfAssignmentPdf } from '../_lib/deed.js';
 import { buildPaymentHistoryTable } from '../_lib/paymentHistory.js';
 import { generateContractCode } from '../_lib/contractCode.js';
+import { attachContract, attachDeed } from '../_lib/documents.js';
 
 export default async function handler(req, res) {
   if (handleCors(req, res)) return;
@@ -19,12 +21,22 @@ export default async function handler(req, res) {
     const {
       custType, txType, customer, newCust, salesOrder,
       propDesc, plotSize, item, fullPrice, amtPaid, payDate, payMode,
-      bankAccount, salesperson, notes,
+      bankAccount, salesperson, notes, realtorEmails, finalPayment,
     } = req.body || {};
 
     if (!txType || !amtPaid || !payDate) {
       return res.status(400).json({ error: 'Missing required payment fields' });
     }
+
+    // Manually-entered realtor email(s) (comma-separated in the form) are
+    // combined with the logged-in staff member's own email — everyone who
+    // should be CC'd on every document/receipt for this transaction.
+    const manualRealtorEmails = String(realtorEmails || '')
+      .split(',')
+      .map((e) => e.trim())
+      .filter(Boolean);
+    const ccList = [...new Set([session.email, ...manualRealtorEmails].filter(Boolean))];
+    const realtorEmailForLog = ccList.join(', ');
 
     // Step 1: resolve customer
     let customerId, customerName, customerEmail, customerAddress = '', customerCreated = false;
@@ -91,8 +103,17 @@ export default async function handler(req, res) {
     const emailErrors = [];
 
     let contractCode = null;
+    // Tracks whether this payment settles the property in full — always
+    // true for outright sales; for installments/top-ups it's either
+    // detected automatically (balance reaches zero) or forced via the
+    // "final payment" toggle in the form. Drives whether the full
+    // document bundle (Contract of Sale + Deed of Assignment, and for
+    // top-ups the sales order itself) goes out with this payment.
+    let isFinalPayment = false;
+    let docsSent = ['Payment Receipt'];
 
     if (txType === 'outright') {
+      isFinalPayment = true;
       const notesText = `Full payment received. ${payMode}${notes ? ' — ' + notes : ''}`;
       const invoice = await zoho.createInvoice({
         customerId, date: payDate, itemId: item?.item_id, lineItemName: itemLabel, rate: Number(fullPrice), notes: notesText, salesperson,
@@ -101,28 +122,42 @@ export default async function handler(req, res) {
       if (!verified) throw new Error('Invoice was created but could not be verified. Check Zoho Books directly.');
       docType = 'invoice'; docId = invoice.invoice_id; docNumber = invoice.invoice_number;
 
-      // Generate the customized Contract of Sale and attach it to the
-      // invoice so it goes out as a real attachment on the same email —
-      // non-blocking: a contract failure shouldn't stop the sale itself.
+      // Generate the customized Contract of Sale and attach it — every
+      // sale gets this. An outright purchase is always fully paid at
+      // inception, so the Deed of Conveyance (ownership transfer) also
+      // goes out immediately, per Landblaze's own contract terms ("...
+      // Deed of Assignment ... upon full settlement of the purchase
+      // price"). Non-blocking: a document failure shouldn't stop the sale
+      // itself.
       try {
         contractCode = await generateContractCode(payDate);
         const contractPdf = await buildContractPdf({
           customerName, customerAddress, propertyDescription: itemLabel, plotSize,
           fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
           contractDate: payDate, documentNumber: invoice.invoice_number, contractCode,
+          deedAttached: true,
         });
-        await zoho.attachContractToInvoice(invoice.invoice_id, contractPdf);
+        await attachContract({ docKind: 'invoice', docId: invoice.invoice_id, contractPdf });
+        docsSent.push('Invoice', 'Contract of Sale');
+
+        const deedPdf = await buildDeedOfAssignmentPdf({
+          customerName, customerAddress, propertyDescription: itemLabel, plotSize,
+          considerationAmount: Number(fullPrice),
+          documentNumber: invoice.invoice_number, contractCode,
+        });
+        await attachDeed({ docKind: 'invoice', docId: invoice.invoice_id, deedPdf });
+        docsSent.push('Deed of Conveyance');
       } catch (e) {
         emailErrors.push(`Contract generation: ${e.message}`);
       }
 
       // Send the invoice to the customer (emails their copy, CC'd to the
-      // realtor who processed the sale) and explicitly mark it as sent —
-      // this is what moves it out of draft status in Zoho Books. Done
-      // independently so a failed email doesn't leave the invoice stuck
-      // in Draft.
+      // realtor(s) — the logged-in staff member plus any manually-entered
+      // realtor emails) and explicitly mark it as sent — this is what
+      // moves it out of draft status in Zoho Books. Done independently so
+      // a failed email doesn't leave the invoice stuck in Draft.
       try {
-        await zoho.sendInvoiceEmail(invoice.invoice_id, { email: customerEmail, ccEmail: session.email, invoiceNumber: invoice.invoice_number, sendAttachment: true, contractCode });
+        await zoho.sendInvoiceEmail(invoice.invoice_id, { email: customerEmail, ccEmail: ccList, invoiceNumber: invoice.invoice_number, sendAttachment: true, contractCode });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Invoice email: ${e.message}`);
@@ -142,35 +177,61 @@ export default async function handler(req, res) {
       if (!verified) throw new Error('Sales order was created but could not be verified. Check Zoho Books directly.');
       docType = 'sales_order'; docId = so.salesorder_id; docNumber = so.salesorder_number;
 
-      // Same as outright: generate and attach the customized contract,
-      // non-blocking on failure.
+      // Generate and attach the customized Contract of Sale — every sale
+      // gets this. The Deed of Conveyance only goes out if this
+      // installment sale happens to be fully settled from day one — the
+      // very first deposit already covers the full price, or the "final
+      // payment" toggle was ticked. Otherwise the deed waits for the
+      // balance to actually reach zero (see the top-up branch below).
+      isFinalPayment = Boolean(finalPayment) || Number(amtPaid) >= Number(fullPrice);
       try {
         contractCode = await generateContractCode(payDate);
         const contractPdf = await buildContractPdf({
           customerName, customerAddress, propertyDescription: itemLabel, plotSize,
           fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
           contractDate: payDate, documentNumber: so.salesorder_number, contractCode,
+          deedAttached: isFinalPayment,
         });
-        await zoho.attachContractToSalesOrder(so.salesorder_id, contractPdf);
+        await attachContract({ docKind: 'salesorder', docId: so.salesorder_id, contractPdf });
+        docsSent.push('Sales Order', 'Contract of Sale');
+
+        if (isFinalPayment) {
+          const deedPdf = await buildDeedOfAssignmentPdf({
+            customerName, customerAddress, propertyDescription: itemLabel, plotSize,
+            considerationAmount: Number(fullPrice),
+            documentNumber: so.salesorder_number, contractCode,
+          });
+          await attachDeed({ docKind: 'salesorder', docId: so.salesorder_id, deedPdf });
+          docsSent.push('Deed of Conveyance');
+        }
       } catch (e) {
         emailErrors.push(`Contract generation: ${e.message}`);
       }
 
       // Send the sales order to the customer (emails their copy, CC'd to
-      // the realtor who processed the sale) and explicitly mark it as
-      // Open — sales orders use Draft/Open/Closed/Void in Zoho Books (not
+      // the realtor(s) — the logged-in staff member plus any
+      // manually-entered realtor emails) and explicitly mark it as Open —
+      // sales orders use Draft/Open/Closed/Void in Zoho Books (not
       // "sent"). Done independently so a failed email doesn't leave the
       // order stuck in Draft.
       try {
-        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, ccEmail: session.email, salesorderNumber: so.salesorder_number, sendAttachment: true, contractCode });
+        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, ccEmail: ccList, salesorderNumber: so.salesorder_number, sendAttachment: true, contractCode });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Sales order email: ${e.message}`);
       }
-      try {
-        await zoho.markSalesOrderOpen(so.salesorder_id);
-      } catch (e) {
-        emailErrors.push(`Sales order status update: ${e.message}`);
+      if (isFinalPayment) {
+        try {
+          await zoho.markSalesOrderClosed(so.salesorder_id);
+        } catch (e) {
+          emailErrors.push(`Sales order status update: ${e.message}`);
+        }
+      } else {
+        try {
+          await zoho.markSalesOrderOpen(so.salesorder_id);
+        } catch (e) {
+          emailErrors.push(`Sales order status update: ${e.message}`);
+        }
       }
 
     } else if (txType === 'topup') {
@@ -204,6 +265,64 @@ export default async function handler(req, res) {
         soNumber: salesOrder.salesorder_number,
       });
       paymentHistoryHtml = html;
+
+      // Final payment on a top-up: either the running balance has hit
+      // zero on its own, or the "final payment" toggle was ticked to force
+      // it (e.g. a cash settlement of an odd remaining amount). Either way,
+      // this is the moment the full document bundle — a freshly-generated
+      // Contract of Sale reflecting full settlement, plus the Deed of
+      // Assignment — goes out on the original sales order, and the order
+      // is closed out.
+      isFinalPayment = Boolean(finalPayment) || soRemainingBalance <= 0;
+      if (isFinalPayment) {
+        try {
+          const originalTx = priorPayments.find((t) => t.docType === 'sales_order');
+          const finalContractCode = originalTx?.contractCode || await generateContractCode(payDate);
+          contractCode = finalContractCode;
+          const contractPdf = await buildContractPdf({
+            customerName,
+            customerAddress,
+            propertyDescription: salesOrder.subject || itemLabel,
+            plotSize: originalTx?.plotSize || '',
+            fullPrice: Number(salesOrder.total),
+            amountPaid: priorPaid + Number(amtPaid),
+            contractDate: payDate,
+            documentNumber: salesOrder.salesorder_number,
+            contractCode: finalContractCode,
+            deedAttached: true,
+          });
+          await attachContract({ docKind: 'salesorder', docId: salesOrder.salesorder_id, contractPdf });
+          docsSent.push('Sales Order (final)', 'Contract of Sale');
+
+          const deedPdf = await buildDeedOfAssignmentPdf({
+            customerName,
+            customerAddress,
+            propertyDescription: originalTx?.propDesc || salesOrder.subject || itemLabel,
+            plotSize: originalTx?.plotSize || '',
+            considerationAmount: Number(salesOrder.total),
+            documentNumber: salesOrder.salesorder_number,
+            contractCode: finalContractCode,
+          });
+          await attachDeed({ docKind: 'salesorder', docId: salesOrder.salesorder_id, deedPdf });
+          docsSent.push('Deed of Conveyance');
+
+          await zoho.sendSalesOrderEmail(salesOrder.salesorder_id, {
+            email: customerEmail,
+            ccEmail: ccList,
+            salesorderNumber: salesOrder.salesorder_number,
+            sendAttachment: true,
+            contractCode: finalContractCode,
+          });
+
+          try {
+            await zoho.markSalesOrderClosed(salesOrder.salesorder_id);
+          } catch (e) {
+            emailErrors.push(`Sales order status update: ${e.message}`);
+          }
+        } catch (e) {
+          emailErrors.push(`Final payment document bundle: ${e.message}`);
+        }
+      }
     }
 
     // Every transaction — receipt-only top-ups included — emails the
@@ -212,7 +331,7 @@ export default async function handler(req, res) {
     try {
       await zoho.sendPaymentReceiptEmail(payment.payment_id, {
         email: customerEmail,
-        ccEmail: session.email,
+        ccEmail: ccList,
         paymentNumber: payment.payment_number,
         extraBodyHtml: paymentHistoryHtml,
       });
@@ -227,7 +346,7 @@ export default async function handler(req, res) {
       timestamp: new Date().toISOString(),
       realtor: session.displayName,
       realtorUsername: session.username,
-      realtorEmail: session.email || '',
+      realtorEmail: realtorEmailForLog,
       custName: customerName,
       custId: customerId,
       custEmail: customerEmail || '',
@@ -245,6 +364,8 @@ export default async function handler(req, res) {
       contractCode,
       paymentId: payment.payment_id,
       soNumber: txType === 'topup' ? salesOrder.salesorder_number : null,
+      finalPayment: isFinalPayment,
+      docsSent,
       emailSent,
       emailErrors,
     };

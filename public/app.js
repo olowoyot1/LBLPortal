@@ -343,14 +343,30 @@ function goStep4() {
     bankAccount = accounts.find((a) => a.account_id === bankSel.value) || { account_id: bankSel.value };
   }
 
-  S.payment = { amtPaid: amt, payDate: date, payMode, salesperson: el('salesperson').value.trim(), notes: el('pay-notes').value.trim() };
+  S.payment = {
+    amtPaid: amt, payDate: date, payMode,
+    salesperson: el('salesperson').value.trim(),
+    notes: el('pay-notes').value.trim(),
+    realtorEmails: el('realtor-emails').value.trim(),
+    finalPayment: el('final-payment-toggle').checked,
+  };
   S.prop = { propDesc, plotSize, fullPrice };
   S.bankAccount = bankAccount;
 
   const custName = S.custType === 'new' ? S.newCust.name : S.customer.customer_name;
   const custEmail = S.custType === 'new' ? S.newCust.email : S.customer.email;
   const txLabels = { topup: 'Installment Top-up', outright: 'Outright Purchase', installment: 'New Installment' };
-  const docsText = { outright: '① Payment receipt (emailed)<br>② Invoice (sent &amp; emailed)', installment: '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed)', topup: '① Payment receipt (emailed)' };
+  const isForcedFinal = S.payment.finalPayment && S.txType !== 'outright';
+  const willBeFinal = S.txType === 'outright' || isForcedFinal;
+  const docsText = {
+    outright: '① Payment receipt (emailed)<br>② Invoice (sent &amp; emailed)<br>③ Contract of Sale (attached)<br>④ Deed of Assignment (attached)',
+    installment: willBeFinal
+      ? '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed, closed as fully paid)<br>③ Contract of Sale (attached)<br>④ Deed of Assignment (attached)'
+      : '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed)<br>③ Contract of Sale (attached)<br>④ Deed of Assignment (attached)',
+    topup: willBeFinal
+      ? '① Payment receipt (emailed)<br>② Final payment detected/forced — full bundle also resent: Sales Order, Contract of Sale &amp; Deed of Assignment (sales order will be closed)'
+      : '① Payment receipt (emailed)',
+  };
 
   el('review-card').innerHTML = `
     <div class="card-title">Review Before Confirming</div>
@@ -360,6 +376,8 @@ function goStep4() {
     ${isTopup ? `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Sales Order: ${escapeHtml(S.salesOrder.salesorder_number)}</div><div class="s-sub">Balance before this payment: ${fmt(S.salesOrder.balance_due ?? S.salesOrder.total)}</div></div></div>` : ''}
     <div class="s-row"><div class="s-icon ok">💰</div><div><div class="s-label">Amount Paid: ${fmt(amt)}</div><div class="s-sub">${modeLabel(S.payment.payMode)}${bankAccount ? ' · ' + escapeHtml(bankAccount.account_name || '') : ''} · ${date}</div></div></div>
     ${S.payment.salesperson ? `<div class="s-row"><div class="s-icon ok">👔</div><div><div class="s-label">Realtor</div><div class="s-sub">${escapeHtml(S.payment.salesperson)}</div></div></div>` : ''}
+    ${S.payment.realtorEmails ? `<div class="s-row"><div class="s-icon ok">📧</div><div><div class="s-label">Realtor Email(s) CC'd</div><div class="s-sub">${escapeHtml(S.payment.realtorEmails)}</div></div></div>` : ''}
+    ${willBeFinal ? `<div class="s-row"><div class="s-icon ok" style="background:var(--gold-bg,#FFF3D6)">🏁</div><div><div class="s-label" style="color:var(--gold)">Final Payment${isForcedFinal ? ' — forced by toggle' : ''}</div><div class="s-sub">Full document bundle will be sent.</div></div></div>` : ''}
     <div class="s-row"><div class="s-icon ok">📝</div><div><div class="s-label">Documents to be created &amp; sent</div><div class="s-sub">${docsText[S.txType]}</div></div></div>
   `;
   hide('error-box'); setStep(4);
@@ -386,7 +404,9 @@ async function processPayment() {
     payMode: S.payment.payMode,
     bankAccount: S.bankAccount,
     salesperson: S.payment.salesperson,
-    notes: S.payment.notes
+    notes: S.payment.notes,
+    realtorEmails: S.payment.realtorEmails,
+    finalPayment: S.payment.finalPayment,
   };
 
   try {
@@ -396,6 +416,9 @@ async function processPayment() {
     const emailRow = result.emailSent
       ? `<div class="s-row"><div class="s-icon ok">📧</div><div><div class="s-label">Emailed to customer</div><div class="s-sub">${escapeHtml(result.custEmail || '')}</div></div></div>`
       : `<div class="s-row"><div class="s-icon" style="background:var(--red-bg)">⚠️</div><div><div class="s-label" style="color:var(--red)">Could not email customer</div><div class="s-sub">${escapeHtml((result.emailErrors || []).join(' · ') || 'No email on file')}</div></div></div>`;
+    const finalBundleRow = (result.finalPayment && result.txType === 'topup')
+      ? `<div class="s-row"><div class="s-icon ok" style="background:var(--gold-bg,#FFF3D6)">🏁</div><div><div class="s-label" style="color:var(--gold)">Final payment — full document bundle sent</div><div class="s-sub">${escapeHtml((result.docsSent || []).join(' · '))}</div></div></div>`
+      : '';
     el('success-content').innerHTML = `
       <div style="text-align:center;padding:1rem 0 1.5rem">
         <div style="font-size:32px;margin-bottom:8px">✅</div>
@@ -407,7 +430,9 @@ async function processPayment() {
       ${result.docType !== 'receipt_only'
         ? `<div class="s-row"><div class="s-icon ok">📄</div><div><div class="s-label">${docLabels[result.docType]} sent to customer &amp; verified</div>${result.docType === 'sales_order' ? `<div class="s-sub">Full contract: ${fmt(result.fullPrice)}</div>` : ''}<span class="doc-chip">${escapeHtml(result.docNumber || result.docId)}</span></div></div>`
         : `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Top-up applied to ${escapeHtml(result.soNumber || '')}</div><div class="s-sub">Remaining balance: ${fmt(result.soRemainingBalance ?? 0)}</div></div></div>`}
+      ${finalBundleRow}
       ${emailRow}
+      <button class="log-btn gold" onclick="resendContractFromModal('${result.id}', this)" style="width:100%;justify-content:center;display:flex;align-items:center;gap:6px;margin-top:10px">📨 Send/Resend Documents Now</button>
     `;
   } catch (e) {
     el('error-box').className = 'err-box';
@@ -424,7 +449,8 @@ function resetPayment() {
   hide('existing-search'); hide('new-cust-form'); hide('so-picker');
   el('next1').disabled = true;
   el('search-name').value = ''; el('search-results').innerHTML = ''; el('so-list').innerHTML = ''; el('item-results').innerHTML = '';
-  ['new-name', 'new-email', 'new-phone', 'new-address', 'prop-desc', 'plot-size', 'full-price', 'amount-paid', 'salesperson', 'pay-notes'].forEach((id) => { if (el(id)) el(id).value = ''; });
+  ['new-name', 'new-email', 'new-phone', 'new-address', 'prop-desc', 'plot-size', 'full-price', 'amount-paid', 'salesperson', 'realtor-emails', 'pay-notes'].forEach((id) => { if (el(id)) el(id).value = ''; });
+  if (el('final-payment-toggle')) el('final-payment-toggle').checked = false;
   setStep(1);
 }
 
@@ -466,7 +492,7 @@ async function renderLog() {
         <tr class="log-row" onclick="openTxDetail('${e.id}')" tabindex="0" title="Click to view full details">
           <td style="white-space:nowrap;color:var(--muted)">${new Date(e.timestamp).toLocaleDateString('en-NG')}</td>
           <td><div style="font-weight:500">${escapeHtml(e.custName)}</div>${e.custCreated ? '<div style="font-size:10px;color:var(--gold)">New</div>' : ''}</td>
-          <td><span class="tx-badge tx-${e.txType}">${txLabels[e.txType] || e.txType}</span></td>
+          <td><span class="tx-badge tx-${e.txType}">${txLabels[e.txType] || e.txType}</span>${e.finalPayment ? ' <span class="tx-badge" style="background:var(--gold-bg,#FFF3D6);color:var(--gold,#B8860B)" title="Final payment — full documents sent">🏁 Final</span>' : ''}</td>
           <td style="font-family:'DM Mono',monospace;font-size:12px">${fmt(e.amtPaid)}</td>
           <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gold)">${escapeHtml(e.docNumber || e.paymentId || '—')}${e.soNumber ? '<br><span style="color:var(--muted)">SO: ' + escapeHtml(e.soNumber) + '</span>' : ''}</td>
           <td>${e.emailSent ? '<span style="color:var(--green)">✓ Sent</span>' : '<span style="color:var(--red)" title="' + escapeHtml((e.emailErrors || []).join(' · ')) + '">✗ Failed</span>'}</td>
@@ -483,7 +509,8 @@ function openTxDetail(transactionId) {
 
   const txLabels = { topup: 'Top-up', outright: 'Outright Purchase', installment: 'New Installment' };
   const docLabels = { invoice: 'Invoice', sales_order: 'Sales Order', receipt_only: 'Receipt Only' };
-  const canResend = tx.docType === 'invoice' || tx.docType === 'sales_order';
+  const isDocTx = tx.docType === 'invoice' || tx.docType === 'sales_order';
+  const resendLabel = isDocTx ? 'Resend Documents (Contract + Deed)' : 'Resend Payment Receipt';
 
   const row = (label, value) => value
     ? `<div class="detail-row"><div class="detail-label">${escapeHtml(label)}</div><div class="detail-value">${value}</div></div>`
@@ -506,15 +533,17 @@ function openTxDetail(transactionId) {
     ${tx.soNumber ? row('Linked Sales Order', escapeHtml(tx.soNumber)) : ''}
     ${row('Contract Code', tx.contractCode ? `<span style="font-family:'DM Mono',monospace">${escapeHtml(tx.contractCode)}</span>` : '<span style="color:var(--muted)">Not generated</span>')}
     ${row('Realtor', escapeHtml(tx.realtor || '—') + (tx.realtorEmail ? ' · ' + escapeHtml(tx.realtorEmail) : ''))}
+    ${row('Final Payment', tx.finalPayment ? '<span style="color:var(--gold)">🏁 Yes — full document bundle sent</span>' : '')}
+    ${row('Documents Sent', (tx.docsSent || []).length ? escapeHtml(tx.docsSent.join(' · ')) : '')}
     ${row('Customer Emailed', tx.emailSent
       ? '<span style="color:var(--green)">✓ Sent</span>'
       : '<span style="color:var(--red)">✗ Failed' + ((tx.emailErrors || []).length ? ' — ' + escapeHtml(tx.emailErrors.join(' · ')) : '') + '</span>')}
     ${row('New Customer', tx.custCreated ? '<span style="color:var(--gold)">Yes — created during this transaction</span>' : '')}
 
     <div id="tx-detail-resend-area" style="margin-top:1.25rem">
-      ${canResend
-        ? `<button class="log-btn gold" id="tx-detail-resend-btn" onclick="resendContractFromModal('${tx.id}')" style="width:100%;justify-content:center;display:flex;align-items:center;gap:6px">Resend Contract &amp; Document</button>`
-        : '<div style="font-size:12px;color:var(--muted);text-align:center">Top-ups don\u2019t carry their own contract — see the original installment/outright transaction.</div>'
+      ${tx.custEmail
+        ? `<button class="log-btn gold" id="tx-detail-resend-btn" onclick="resendContractFromModal('${tx.id}', this)" style="width:100%;justify-content:center;display:flex;align-items:center;gap:6px">${resendLabel}</button>`
+        : '<div style="font-size:12px;color:var(--muted);text-align:center">No customer email on file — add one in Zoho Books before resending.</div>'
       }
     </div>
   `;
@@ -525,17 +554,23 @@ function closeTxDetail() {
   el('tx-detail-modal').classList.add('hidden');
 }
 
-async function resendContractFromModal(transactionId) {
-  const btn = el('tx-detail-resend-btn');
+// Works from the transaction detail modal's fixed button OR from the
+// one-off "Send/Resend Documents Now" button shown right after processing
+// a payment — pass the clicked button element so either caller works.
+async function resendContractFromModal(transactionId, btnEl) {
+  const btn = btnEl || el('tx-detail-resend-btn');
+  if (!btn) return;
   const originalText = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Resending...';
+  btn.innerHTML = '<span class="spinner"></span> Sending...';
   try {
-    const result = await api('/api/contracts/resend', { method: 'POST', body: JSON.stringify({ transactionId }) });
-    btn.innerHTML = `✓ Resent to ${escapeHtml(result.custEmail || '')}`;
-    setTimeout(() => { btn.innerHTML = originalText; btn.disabled = false; }, 3500);
+    const result = await api('/api/contracts/resend', { method: 'POST', body: JSON.stringify({ transactionId } ) });
+    const sentWhat = (result.docsSent && result.docsSent.length) ? result.docsSent.join(' + ') : 'documents';
+    btn.innerHTML = `✓ Sent ${escapeHtml(sentWhat)} to ${escapeHtml(result.custEmail || '')}`;
+    setTimeout(() => { btn.innerHTML = originalText; btn.disabled = false; }, 4000);
+    if (typeof logCache !== 'undefined' && logCache.length) renderLog();
   } catch (e) {
-    alert(`Could not resend contract: ${e.message}`);
+    alert(`Could not send documents: ${e.message}`);
     btn.innerHTML = originalText;
     btn.disabled = false;
   }
@@ -555,13 +590,14 @@ async function exportCSV() {
   let log = [];
   try { log = await api('/api/transactions'); } catch (e) { alert(e.message); return; }
   if (!log.length) { alert('No transactions to export.'); return; }
-  const headers = ['Timestamp', 'Realtor', 'Customer', 'Customer ID', 'Customer Email', 'New Customer', 'Tx Type', 'Property', 'Amount Paid', 'Full Price', 'Payment Mode', 'Bank Account', 'Document Type', 'Document Number', 'Payment ID', 'SO Number', 'Emailed'];
+  const headers = ['Timestamp', 'Realtor', 'Realtor Email(s)', 'Customer', 'Customer ID', 'Customer Email', 'New Customer', 'Tx Type', 'Property', 'Amount Paid', 'Full Price', 'Payment Mode', 'Bank Account', 'Document Type', 'Document Number', 'Payment ID', 'SO Number', 'Final Payment', 'Documents Sent', 'Emailed'];
   const rows = log.map((e) => [
     new Date(e.timestamp).toLocaleString('en-NG'),
-    e.realtor, e.custName, e.custId, e.custEmail || '', e.custCreated ? 'Yes' : 'No',
+    e.realtor, e.realtorEmail || '', e.custName, e.custId, e.custEmail || '', e.custCreated ? 'Yes' : 'No',
     e.txType, e.propDesc || '', e.amtPaid, e.fullPrice || '',
     modeLabel(e.payMode), e.bankAccountName || '', e.docType || '',
-    e.docNumber || '', e.paymentId || '', e.soNumber || '', e.emailSent ? 'Yes' : 'No'
+    e.docNumber || '', e.paymentId || '', e.soNumber || '',
+    e.finalPayment ? 'Yes' : 'No', (e.docsSent || []).join(' | '), e.emailSent ? 'Yes' : 'No'
   ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
   const csv = [headers.join(','), ...rows].join('\n');
   const a = document.createElement('a');

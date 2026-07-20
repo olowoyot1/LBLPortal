@@ -261,11 +261,12 @@ export async function createContact({ name, email, phone, address }) {
 
 // ── Attachments ──
 // Generic helper to attach a generated file (e.g. the customized Contract
-// of Sale PDF) to a sales order or invoice in Zoho Books, so it rides along
-// as a real attachment when the document is emailed (send_attachment=true).
-async function attachFileToDocument(docType, docId, fileBuffer, fileName) {
+// of Sale PDF, or the Deed of Assignment template) to a sales order or
+// invoice in Zoho Books, so it rides along as a real attachment when the
+// document is emailed (send_attachment=true).
+async function attachFileToDocument(docType, docId, fileBuffer, fileName, contentType = 'application/pdf') {
   const form = new FormData();
-  form.append('attachment', fileBuffer, { filename: fileName, contentType: 'application/pdf' });
+  form.append('attachment', fileBuffer, { filename: fileName, contentType });
   // can_send_in_mail tells Zoho to include this attachment when the
   // document's /email endpoint is called with send_attachment=true.
   form.append('can_send_in_mail', 'true');
@@ -278,6 +279,27 @@ export async function attachContractToSalesOrder(salesorderId, pdfBuffer, fileNa
 
 export async function attachContractToInvoice(invoiceId, pdfBuffer, fileName = 'Contract_of_Sale.pdf') {
   await attachFileToDocument('invoices', invoiceId, pdfBuffer, fileName);
+}
+
+// Attaches the static Deed of Assignment template (see api/_lib/deed.js)
+// alongside the Contract of Sale, so both go out together as real
+// attachments on the same email.
+export async function attachDeedOfAssignmentToSalesOrder(salesorderId, fileBuffer, fileName, contentType) {
+  await attachFileToDocument('salesorders', salesorderId, fileBuffer, fileName, contentType);
+}
+
+export async function attachDeedOfAssignmentToInvoice(invoiceId, fileBuffer, fileName, contentType) {
+  await attachFileToDocument('invoices', invoiceId, fileBuffer, fileName, contentType);
+}
+
+// Normalizes a CC input (comma-separated string, array, or empty) into a
+// deduplicated array of trimmed, non-empty addresses. Lets callers pass a
+// single realtor's email, several manually-entered realtor emails, or a
+// mix of both, uniformly.
+function toCcArray(ccEmail) {
+  if (!ccEmail) return [];
+  const arr = Array.isArray(ccEmail) ? ccEmail : String(ccEmail).split(',');
+  return [...new Set(arr.map((e) => String(e || '').trim()).filter(Boolean))];
 }
 
 // ── Sales orders ──
@@ -355,13 +377,14 @@ export async function sendSalesOrderEmail(salesorderId, { email, ccEmail, saleso
   if (email) payload.to_mail_ids = [email];
   if (sendAttachment) payload.send_attachment = true;
 
-  if (ccEmail) {
+  const ccList = toCcArray(ccEmail);
+  if (ccList.length) {
     // cc_mail_ids isn't independently confirmed against Zoho's current API
     // for this specific endpoint, so attempt with CC first and gracefully
     // retry without it if Zoho rejects the field — the customer's email is
     // the priority and must not be blocked by a CC-only failure.
     try {
-      await zohoRequest('post', `/salesorders/${salesorderId}/email`, { data: { ...payload, cc_mail_ids: [ccEmail] } });
+      await zohoRequest('post', `/salesorders/${salesorderId}/email`, { data: { ...payload, cc_mail_ids: ccList } });
       return;
     } catch (e) {
       // fall through and retry without CC
@@ -377,6 +400,16 @@ export async function markSalesOrderOpen(salesorderId) {
   // order is guaranteed to leave Draft even if the email step is skipped
   // or fails (e.g. customer has no email on file).
   await zohoRequest('post', `/salesorders/${salesorderId}/status/open`);
+}
+
+export async function markSalesOrderClosed(salesorderId) {
+  // Called once a sales order's balance has been fully settled (either
+  // detected automatically or forced via the "final payment" toggle) so
+  // the order doesn't sit in Open indefinitely. Best-effort: some Zoho
+  // Books orgs/plans don't allow a manual Open→Closed transition, so
+  // callers treat a failure here as non-blocking — the documents still
+  // go out regardless.
+  await zohoRequest('post', `/salesorders/${salesorderId}/status/closed`);
 }
 
 // ── Invoices ──
@@ -415,9 +448,10 @@ export async function sendInvoiceEmail(invoiceId, { email, ccEmail, invoiceNumbe
   if (email) payload.to_mail_ids = [email];
   if (sendAttachment) payload.send_attachment = true;
 
-  if (ccEmail) {
+  const ccList = toCcArray(ccEmail);
+  if (ccList.length) {
     try {
-      await zohoRequest('post', `/invoices/${invoiceId}/email`, { data: { ...payload, cc_mail_ids: [ccEmail] } });
+      await zohoRequest('post', `/invoices/${invoiceId}/email`, { data: { ...payload, cc_mail_ids: ccList } });
       return;
     } catch (e) {
       // fall through and retry without CC
@@ -475,9 +509,10 @@ export async function sendPaymentReceiptEmail(paymentId, { email, ccEmail, payme
   const payload = { subject, body: finalBody };
   if (email) payload.to_mail_ids = [email];
 
-  if (ccEmail) {
+  const ccList = toCcArray(ccEmail);
+  if (ccList.length) {
     try {
-      await zohoRequest('post', `/customerpayments/${paymentId}/email`, { data: { ...payload, cc_mail_ids: [ccEmail] } });
+      await zohoRequest('post', `/customerpayments/${paymentId}/email`, { data: { ...payload, cc_mail_ids: ccList } });
       return;
     } catch (e) {
       // fall through and retry without CC

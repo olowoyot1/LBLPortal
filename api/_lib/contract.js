@@ -65,6 +65,7 @@ const MUTUAL_COVENANTS = [
  * @param {string} params.contractDate         ISO date string
  * @param {string} [params.documentNumber]      invoice/sales order number, shown for reference
  * @param {string} [params.contractCode]        app-generated reference code, e.g. LBL-2026-0001
+ * @param {boolean} [params.deedAttached]        true when the Deed of Assignment template is riding along as a separate attachment on this same email
  * @returns {Promise<Buffer>}
  */
 export function buildContractPdf({
@@ -77,6 +78,7 @@ export function buildContractPdf({
   contractDate,
   documentNumber,
   contractCode,
+  deedAttached,
 }) {
   return new Promise((resolve, reject) => {
     const doc = new PDFKit({ size: 'A4', margins: { top: 56, bottom: 56, left: 64, right: 64 } });
@@ -219,7 +221,14 @@ export function buildContractPdf({
       doc.text(`\u2022  ${t}`, { width: PAGE_WIDTH });
       spacer(3);
     });
-    spacer(10);
+    spacer(6);
+    if (deedAttached) {
+      doc.font('Helvetica-Oblique').fontSize(9);
+      para('A copy of the Deed of Assignment for this property is attached alongside this Contract of Sale.', { width: PAGE_WIDTH });
+      doc.font('Helvetica').fontSize(10);
+      spacer(6);
+    }
+    spacer(4);
 
     // 4.1 Purchaser Covenants
     ensureSpace(140);

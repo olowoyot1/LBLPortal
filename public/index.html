@@ -545,8 +545,20 @@ a{color:var(--gold);text-decoration:none}
           <input type="text" id="salesperson" placeholder="e.g. Daniel"/>
         </div>
         <div class="form-row">
+          <label>Realtor Email(s) — CC on documents (optional)</label>
+          <input type="text" id="realtor-emails" placeholder="e.g. realtor1@email.com, realtor2@email.com"/>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">Comma-separate multiple addresses. They'll be CC'd on every receipt/invoice/sales-order/contract email for this transaction, alongside your own.</div>
+        </div>
+        <div class="form-row">
           <label>Notes (optional)</label>
           <input type="text" id="pay-notes" placeholder="Any additional info..."/>
+        </div>
+        <div class="form-row" style="display:flex;align-items:flex-start;gap:8px">
+          <input type="checkbox" id="final-payment-toggle" style="width:auto;margin:3px 0 0"/>
+          <div>
+            <label for="final-payment-toggle" style="margin:0;cursor:pointer;display:inline">This is the FINAL payment for this property</label>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">Outright purchases are always final. For top-ups/installments this is normally detected automatically once the balance reaches zero — tick this to force it (e.g. a final cash settlement) so the Contract of Sale &amp; Deed of Assignment go out immediately, regardless of the transaction type.</div>
+          </div>
         </div>
       </div>
       <div class="action-bar">
