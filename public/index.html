@@ -239,7 +239,7 @@ a{color:var(--gold);text-decoration:none}
 .btn-link:hover{background:var(--gold-dim)}
 .btn-link:disabled{opacity:0.6;cursor:default}
 .btn-link .spinner{width:10px;height:10px;border-width:1.5px;margin:0}
-.log-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.5rem}
+.log-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:1.5rem}
 .stat-card{background:var(--surface);border:0.5px solid var(--border);border-radius:10px;padding:12px 14px}
 .stat-label{font-size:11px;color:var(--muted);margin-bottom:4px}
 .stat-value{font-size:18px;font-weight:500}
@@ -484,7 +484,7 @@ a{color:var(--gold);text-decoration:none}
           </button>
           <button class="seg-btn" id="btn-installment" onclick="setTxType('installment')">
             <span class="sb-icon">📋</span>
-            <div><div class="sb-text">New installment purchase</div><div class="sb-sub">Receipt + Sales Order (full contract value)</div></div>
+            <div><div class="sb-text">New installment purchase</div><div class="sb-sub">Receipt + Sales Order + Contract (full contract value)</div></div>
           </button>
         </div>
       </div>

@@ -427,7 +427,7 @@ function goStep4() {
     outright: '① Payment receipt (emailed)<br>② Invoice (sent &amp; emailed)<br>③ Contract of Sale (attached)<br>④ Deed of Conveyance (attached)',
     installment: willBeFinal
       ? '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed, closed as fully paid)<br>③ Contract of Sale (attached)<br>④ Deed of Conveyance (attached)'
-      : '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed)<br><span style="color:var(--muted)">No Contract of Sale or Deed yet — those only go out once this property is fully paid for.</span>',
+      : '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed)<br>③ Contract of Sale (attached)<br><span style="color:var(--muted)">No Deed of Conveyance yet — that only goes out once this property is fully paid for.</span>',
     topup: willBeFinal
       ? '① Payment receipt (emailed)<br>② Full bundle also sent: Sales Order (closed), Contract of Sale &amp; Deed of Conveyance'
       : '① Payment receipt (emailed)',
@@ -555,11 +555,18 @@ async function renderLog() {
 
   const totalAmt = log.reduce((s, e) => s + e.amtPaid, 0);
   const byType = (t) => log.filter((e) => e.txType === t).length;
+  const now = new Date();
+  const thisMonthCount = log.filter((e) => {
+    const d = new Date(e.timestamp);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  }).length;
+  const monthName = now.toLocaleDateString('en-NG', { month: 'long' });
   el('log-stats').innerHTML = `
     <div class="stat-card"><div class="stat-label">Total transactions</div><div class="stat-value">${log.length}</div></div>
     <div class="stat-card"><div class="stat-label">Total collected</div><div class="stat-value" style="font-size:14px">${fmt(totalAmt)}</div></div>
     <div class="stat-card"><div class="stat-label">New purchases</div><div class="stat-value">${byType('outright') + byType('installment')}</div></div>
     <div class="stat-card"><div class="stat-label">Top-ups</div><div class="stat-value">${byType('topup')}</div></div>
+    <div class="stat-card"><div class="stat-label">Payments in ${escapeHtml(monthName)}</div><div class="stat-value">${thisMonthCount}</div></div>
   `;
 
   if (!log.length) {

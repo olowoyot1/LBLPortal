@@ -192,28 +192,27 @@ export default async function handler(req, res) {
       if (!verified) throw new Error('Sales order was created but could not be verified. Check Zoho Books directly.');
       docType = 'sales_order'; docId = so.salesorder_id; docNumber = so.salesorder_number;
 
-      // Unlike outright sales, a fresh installment plan does NOT get the
-      // Contract of Sale or Deed of Conveyance by default — only the
-      // Sales Order (plus the payment receipt, sent to every transaction
-      // type further down). The Contract + Deed only go out once this
-      // property is actually fully paid for: either the very first
-      // deposit already covers the full price, or the "final payment"
-      // toggle was ticked. From then on it behaves exactly like a top-up
-      // reaching zero balance (see the top-up branch below).
+      // The Contract of Sale goes out with every installment sale right
+      // from the start — same as outright. The Deed of Conveyance is the
+      // one exception: it only rides along once this property is
+      // actually fully paid for — either the very first deposit already
+      // covers the full price, or the "final payment" toggle was ticked.
+      // Otherwise it waits for the balance to actually reach zero (see
+      // the top-up branch below).
       isFinalPayment = Boolean(finalPayment) || Number(amtPaid) >= Number(fullPrice);
       docsSent.push('Sales Order');
-      if (isFinalPayment) {
-        try {
-          contractCode = await generateContractCode(payDate);
-          const contractPdf = await buildContractPdf({
-            customerName, customerAddress, propertyDescription: itemLabel, plotSize,
-            fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
-            contractDate: payDate, documentNumber: so.salesorder_number, contractCode,
-            deedAttached: true,
-          });
-          await attachContract({ docKind: 'salesorder', docId: so.salesorder_id, contractPdf });
-          docsSent.push('Contract of Sale');
+      try {
+        contractCode = await generateContractCode(payDate);
+        const contractPdf = await buildContractPdf({
+          customerName, customerAddress, propertyDescription: itemLabel, plotSize,
+          fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
+          contractDate: payDate, documentNumber: so.salesorder_number, contractCode,
+          deedAttached: isFinalPayment,
+        });
+        await attachContract({ docKind: 'salesorder', docId: so.salesorder_id, contractPdf });
+        docsSent.push('Contract of Sale');
 
+        if (isFinalPayment) {
           const deedPdf = await buildDeedOfAssignmentPdf({
             customerName, customerAddress, propertyDescription: itemLabel, plotSize,
             considerationAmount: Number(fullPrice),
@@ -221,22 +220,20 @@ export default async function handler(req, res) {
           });
           await attachDeed({ docKind: 'salesorder', docId: so.salesorder_id, deedPdf });
           docsSent.push('Deed of Conveyance');
-        } catch (e) {
-          emailErrors.push(`Contract generation: ${e.message}`);
         }
+      } catch (e) {
+        emailErrors.push(`Contract generation: ${e.message}`);
       }
 
       // Send the sales order to the customer (emails their copy, CC'd to
       // the realtor(s) — the logged-in staff member plus any
       // manually-entered realtor emails) and explicitly mark it as Open —
       // sales orders use Draft/Open/Closed/Void in Zoho Books (not
-      // "sent"). sendAttachment only true when the Contract of Sale was
-      // actually attached above, so the email subject/body don't
-      // misleadingly claim a contract is attached when it isn't. Done
-      // independently so a failed email doesn't leave the order stuck in
-      // Draft.
+      // "sent"). sendAttachment is always true here since the Contract of
+      // Sale is always attached above. Done independently so a failed
+      // email doesn't leave the order stuck in Draft.
       try {
-        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, ccEmail: ccList, salesorderNumber: so.salesorder_number, sendAttachment: isFinalPayment, contractCode });
+        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, ccEmail: ccList, salesorderNumber: so.salesorder_number, sendAttachment: true, contractCode });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Sales order email: ${e.message}`);
