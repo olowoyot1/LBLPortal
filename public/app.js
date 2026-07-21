@@ -21,7 +21,7 @@ function el(id) { return document.getElementById(id); }
 function show(id) { el(id).classList.remove('hidden'); }
 function hide(id) { el(id).classList.add('hidden'); }
 function modeLabel(m) {
-  return { banktransfer: 'Bank Transfer', cash: 'Cash', creditcard: 'Credit Card', cheque: 'Cheque', others: 'Others' }[m] || m;
+  return { banktransfer: 'Bank Transfer', cash: 'Cash', creditcard: 'Credit Card', cheque: 'Cheque', others: 'Others', legacy: 'Legacy / Pre-Portal' }[m] || m;
 }
 
 // ── auth ──
@@ -241,6 +241,7 @@ function goStep3() {
     el('topup-so-display').className = 'info-box';
     el('topup-so-display').innerHTML = `<strong>Sales Order:</strong> ${escapeHtml(S.salesOrder.salesorder_number)}<br><strong>Property:</strong> ${escapeHtml(S.salesOrder.subject || 'See sales order')}<br><strong>Total Contract:</strong> ${fmt(S.salesOrder.total)}<br><strong>Paid So Far:</strong> ${fmt(S.salesOrder.paid_so_far ?? 0)}<br><strong>Remaining Balance:</strong> ${fmt(S.salesOrder.balance_due ?? S.salesOrder.total)}`;
     el('topup-so-display').style.marginBottom = '0';
+    show('legacy-payment-row');
   } else {
     show('prop-desc-row'); show('plot-size-row'); el('topup-so-display').innerHTML = ''; show('full-price-row');
     el('full-price-label').textContent = S.txType === 'installment'
@@ -249,11 +250,34 @@ function goStep3() {
     el('prop-desc').value = '';
     el('plot-size').value = '';
     el('item-results').innerHTML = '';
+    hide('legacy-payment-row');
   }
+  el('legacy-toggle').checked = false;
+  onLegacyToggleChange();
   el('pay-date').value = new Date().toISOString().split('T')[0];
   loadBankAccounts();
   onPayModeChange();
   setStep(3);
+}
+
+// A legacy/historical payment only ever applies to a top-up against an
+// existing sales order, and skips the fields that don't apply to it
+// (payment mode, bank account, CC emails, final-payment toggle) since it
+// never touches Zoho and never sends an email.
+function onLegacyToggleChange() {
+  const isLegacy = el('legacy-toggle').checked;
+  if (isLegacy) {
+    hide('pay-mode-row'); hide('bank-account-row'); hide('realtor-emails-row'); hide('final-payment-row');
+    el('amount-paid-label').textContent = 'Legacy Payment Amount (NGN) *';
+    el('pay-date-label').textContent = 'Original Payment Date *';
+    el('payment-details-title').textContent = 'Legacy Payment Details';
+  } else {
+    show('pay-mode-row'); show('realtor-emails-row'); show('final-payment-row');
+    onPayModeChange();
+    el('amount-paid-label').textContent = 'Amount Paid (NGN) *';
+    el('pay-date-label').textContent = 'Payment Date *';
+    el('payment-details-title').textContent = 'Payment Details';
+  }
 }
 
 // ── ITEM SEARCH (Zoho Books Items) ──
@@ -324,10 +348,40 @@ function onPayModeChange() {
 
 // ── STEP 4 ──
 function goStep4() {
+  const isTopup = S.txType === 'topup';
+  const isLegacy = isTopup && el('legacy-toggle').checked;
+
   const amt = parseFloat(el('amount-paid').value);
   const date = el('pay-date').value;
-  if (!amt || !date) { alert('Please fill in amount and payment date'); return; }
-  const isTopup = S.txType === 'topup';
+  if (!amt || !date) { alert(isLegacy ? 'Please fill in the legacy payment amount and date' : 'Please fill in amount and payment date'); return; }
+
+  // Legacy payments skip almost everything else — no property/price
+  // fields to validate (already known from the sales order), no payment
+  // mode/bank account (nothing is being deposited today), no realtor CC
+  // or final-payment toggle (no email or documents go out at all).
+  if (isLegacy) {
+    S.payment = {
+      amtPaid: amt, payDate: date, isLegacy: true,
+      salesperson: el('salesperson').value.trim(),
+      notes: el('pay-notes').value.trim(),
+    };
+    S.prop = { propDesc: S.salesOrder.subject || 'See sales order', plotSize: '', fullPrice: S.salesOrder.total };
+    S.bankAccount = null;
+
+    const custName = S.customer.customer_name;
+    const balanceBefore = S.salesOrder.balance_due ?? S.salesOrder.total;
+    const balanceAfter = Math.max(0, Number(balanceBefore) - amt);
+    el('review-card').innerHTML = `
+      <div class="card-title">Review Before Confirming</div>
+      <div class="s-row"><div class="s-icon ok">👤</div><div><div class="s-label">${escapeHtml(custName)}</div><div class="s-sub">Existing customer · ID: ${escapeHtml(S.customer.customer_id)}</div></div></div>
+      <div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Sales Order: ${escapeHtml(S.salesOrder.salesorder_number)}</div><div class="s-sub">Balance before this entry: ${fmt(balanceBefore)}</div></div></div>
+      <div class="s-row"><div class="s-icon ok" style="background:var(--gold-bg,#FFF3D6)">🗂</div><div><div class="s-label" style="color:var(--gold)">Legacy Payment — portal record only</div><div class="s-sub">Amount: ${fmt(amt)} · Date: ${date} · New balance: ${fmt(balanceAfter)}</div></div></div>
+      <div class="s-row"><div class="s-icon ok">🚫</div><div><div class="s-label">No Zoho action, no email</div><div class="s-sub">This only updates the balance &amp; payment history shown in this portal — nothing is created in Zoho and no email is sent.</div></div></div>
+    `;
+    hide('error-box'); setStep(4);
+    return;
+  }
+
   const propDesc = isTopup ? (S.salesOrder.subject || 'See sales order') : el('prop-desc').value.trim();
   const plotSize = isTopup ? '' : el('plot-size').value.trim();
   const fullPrice = isTopup ? S.salesOrder.total : parseFloat(el('full-price').value || 0);
@@ -344,7 +398,7 @@ function goStep4() {
   }
 
   S.payment = {
-    amtPaid: amt, payDate: date, payMode,
+    amtPaid: amt, payDate: date, payMode, isLegacy: false,
     salesperson: el('salesperson').value.trim(),
     notes: el('pay-notes').value.trim(),
     realtorEmails: el('realtor-emails').value.trim(),
@@ -356,15 +410,26 @@ function goStep4() {
   const custName = S.custType === 'new' ? S.newCust.name : S.customer.customer_name;
   const custEmail = S.custType === 'new' ? S.newCust.email : S.customer.email;
   const txLabels = { topup: 'Installment Top-up', outright: 'Outright Purchase', installment: 'New Installment' };
-  const isForcedFinal = S.payment.finalPayment && S.txType !== 'outright';
-  const willBeFinal = S.txType === 'outright' || isForcedFinal;
+
+  // Mirror the backend's exact final-payment detection for an accurate
+  // preview: outright is always final; installment/top-up are final if
+  // the toggle was forced, OR (for a fresh installment) the deposit
+  // already covers the full price, OR (for a top-up) this payment brings
+  // the projected balance to zero.
+  const forced = Boolean(S.payment.finalPayment) && S.txType !== 'outright';
+  const autoFinalInstallment = S.txType === 'installment' && amt >= fullPrice;
+  const projectedBalance = isTopup ? Math.max(0, Number(S.salesOrder.balance_due ?? S.salesOrder.total) - amt) : null;
+  const autoFinalTopup = isTopup && projectedBalance <= 0;
+  const willBeFinal = S.txType === 'outright' || forced || autoFinalInstallment || autoFinalTopup;
+  const finalReason = forced ? ' — forced by toggle' : (autoFinalInstallment || autoFinalTopup) ? ' — balance reaches zero' : '';
+
   const docsText = {
-    outright: '① Payment receipt (emailed)<br>② Invoice (sent &amp; emailed)<br>③ Contract of Sale (attached)<br>④ Deed of Assignment (attached)',
+    outright: '① Payment receipt (emailed)<br>② Invoice (sent &amp; emailed)<br>③ Contract of Sale (attached)<br>④ Deed of Conveyance (attached)',
     installment: willBeFinal
-      ? '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed, closed as fully paid)<br>③ Contract of Sale (attached)<br>④ Deed of Assignment (attached)'
-      : '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed)<br>③ Contract of Sale (attached)<br>④ Deed of Assignment (attached)',
+      ? '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed, closed as fully paid)<br>③ Contract of Sale (attached)<br>④ Deed of Conveyance (attached)'
+      : '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed)<br><span style="color:var(--muted)">No Contract of Sale or Deed yet — those only go out once this property is fully paid for.</span>',
     topup: willBeFinal
-      ? '① Payment receipt (emailed)<br>② Final payment detected/forced — full bundle also resent: Sales Order, Contract of Sale &amp; Deed of Assignment (sales order will be closed)'
+      ? '① Payment receipt (emailed)<br>② Full bundle also sent: Sales Order (closed), Contract of Sale &amp; Deed of Conveyance'
       : '① Payment receipt (emailed)',
   };
 
@@ -377,7 +442,7 @@ function goStep4() {
     <div class="s-row"><div class="s-icon ok">💰</div><div><div class="s-label">Amount Paid: ${fmt(amt)}</div><div class="s-sub">${modeLabel(S.payment.payMode)}${bankAccount ? ' · ' + escapeHtml(bankAccount.account_name || '') : ''} · ${date}</div></div></div>
     ${S.payment.salesperson ? `<div class="s-row"><div class="s-icon ok">👔</div><div><div class="s-label">Realtor</div><div class="s-sub">${escapeHtml(S.payment.salesperson)}</div></div></div>` : ''}
     ${S.payment.realtorEmails ? `<div class="s-row"><div class="s-icon ok">📧</div><div><div class="s-label">Realtor Email(s) CC'd</div><div class="s-sub">${escapeHtml(S.payment.realtorEmails)}</div></div></div>` : ''}
-    ${willBeFinal ? `<div class="s-row"><div class="s-icon ok" style="background:var(--gold-bg,#FFF3D6)">🏁</div><div><div class="s-label" style="color:var(--gold)">Final Payment${isForcedFinal ? ' — forced by toggle' : ''}</div><div class="s-sub">Full document bundle will be sent.</div></div></div>` : ''}
+    ${willBeFinal ? `<div class="s-row"><div class="s-icon ok" style="background:var(--gold-bg,#FFF3D6)">🏁</div><div><div class="s-label" style="color:var(--gold)">Final Payment${finalReason}</div><div class="s-sub">Full document bundle will be sent.</div></div></div>` : ''}
     <div class="s-row"><div class="s-icon ok">📝</div><div><div class="s-label">Documents to be created &amp; sent</div><div class="s-sub">${docsText[S.txType]}</div></div></div>
   `;
   hide('error-box'); setStep(4);
@@ -407,16 +472,34 @@ async function processPayment() {
     notes: S.payment.notes,
     realtorEmails: S.payment.realtorEmails,
     finalPayment: S.payment.finalPayment,
+    legacyPayment: S.payment.isLegacy,
   };
 
   try {
     const result = await api('/api/payments/process', { method: 'POST', body: JSON.stringify(payload) });
+
+    if (result.isLegacy) {
+      setStep(5);
+      el('success-content').innerHTML = `
+        <div style="text-align:center;padding:1rem 0 1.5rem">
+          <div style="font-size:32px;margin-bottom:8px">🗂</div>
+          <div style="font-size:16px;font-weight:500;color:var(--green)">Legacy Payment Recorded</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">${new Date(result.timestamp).toLocaleDateString('en-NG')} · ${escapeHtml(result.realtor)}</div>
+        </div>
+        <div class="s-row"><div class="s-icon ok">👤</div><div><div class="s-label">${escapeHtml(result.custName)}</div><div class="s-sub">ID: ${escapeHtml(result.custId)}</div></div></div>
+        <div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Sales Order: ${escapeHtml(result.soNumber || '')}</div><div class="s-sub">Amount recorded: ${fmt(result.amtPaid)} · Remaining balance: ${fmt(result.soRemainingBalance ?? 0)}</div></div></div>
+        <div class="s-row"><div class="s-icon ok">🚫</div><div><div class="s-label">Portal-only — nothing sent</div><div class="s-sub">No Zoho record was created and no email was sent for this entry.</div></div></div>
+      `;
+      btn.disabled = false; btn.innerHTML = 'Confirm &amp; Process ✓';
+      return;
+    }
+
     const docLabels = { invoice: 'Invoice', sales_order: 'Sales Order', receipt_only: 'Receipt Only' };
     setStep(5);
     const emailRow = result.emailSent
       ? `<div class="s-row"><div class="s-icon ok">📧</div><div><div class="s-label">Emailed to customer</div><div class="s-sub">${escapeHtml(result.custEmail || '')}</div></div></div>`
       : `<div class="s-row"><div class="s-icon" style="background:var(--red-bg)">⚠️</div><div><div class="s-label" style="color:var(--red)">Could not email customer</div><div class="s-sub">${escapeHtml((result.emailErrors || []).join(' · ') || 'No email on file')}</div></div></div>`;
-    const finalBundleRow = (result.finalPayment && result.txType === 'topup')
+    const finalBundleRow = result.finalPayment
       ? `<div class="s-row"><div class="s-icon ok" style="background:var(--gold-bg,#FFF3D6)">🏁</div><div><div class="s-label" style="color:var(--gold)">Final payment — full document bundle sent</div><div class="s-sub">${escapeHtml((result.docsSent || []).join(' · '))}</div></div></div>`
       : '';
     el('success-content').innerHTML = `
@@ -451,6 +534,8 @@ function resetPayment() {
   el('search-name').value = ''; el('search-results').innerHTML = ''; el('so-list').innerHTML = ''; el('item-results').innerHTML = '';
   ['new-name', 'new-email', 'new-phone', 'new-address', 'prop-desc', 'plot-size', 'full-price', 'amount-paid', 'salesperson', 'realtor-emails', 'pay-notes'].forEach((id) => { if (el(id)) el(id).value = ''; });
   if (el('final-payment-toggle')) el('final-payment-toggle').checked = false;
+  if (el('legacy-toggle')) el('legacy-toggle').checked = false;
+  hide('legacy-payment-row');
   setStep(1);
 }
 
@@ -492,10 +577,10 @@ async function renderLog() {
         <tr class="log-row" onclick="openTxDetail('${e.id}')" tabindex="0" title="Click to view full details">
           <td style="white-space:nowrap;color:var(--muted)">${new Date(e.timestamp).toLocaleDateString('en-NG')}</td>
           <td><div style="font-weight:500">${escapeHtml(e.custName)}</div>${e.custCreated ? '<div style="font-size:10px;color:var(--gold)">New</div>' : ''}</td>
-          <td><span class="tx-badge tx-${e.txType}">${txLabels[e.txType] || e.txType}</span>${e.finalPayment ? ' <span class="tx-badge" style="background:var(--gold-bg,#FFF3D6);color:var(--gold,#B8860B)" title="Final payment — full documents sent">🏁 Final</span>' : ''}</td>
+          <td><span class="tx-badge tx-${e.txType}">${e.isLegacy ? 'Legacy' : (txLabels[e.txType] || e.txType)}</span>${e.finalPayment ? ' <span class="tx-badge" style="background:var(--gold-bg,#FFF3D6);color:var(--gold,#B8860B)" title="Final payment — full documents sent">🏁 Final</span>' : ''}</td>
           <td style="font-family:'DM Mono',monospace;font-size:12px">${fmt(e.amtPaid)}</td>
           <td style="font-family:'DM Mono',monospace;font-size:11px;color:var(--gold)">${escapeHtml(e.docNumber || e.paymentId || '—')}${e.soNumber ? '<br><span style="color:var(--muted)">SO: ' + escapeHtml(e.soNumber) + '</span>' : ''}</td>
-          <td>${e.emailSent ? '<span style="color:var(--green)">✓ Sent</span>' : '<span style="color:var(--red)" title="' + escapeHtml((e.emailErrors || []).join(' · ')) + '">✗ Failed</span>'}</td>
+          <td>${e.isLegacy ? '<span style="color:var(--muted)" title="Portal-only record — no email applicable">N/A</span>' : (e.emailSent ? '<span style="color:var(--green)">✓ Sent</span>' : '<span style="color:var(--red)" title="' + escapeHtml((e.emailErrors || []).join(' · ')) + '">✗ Failed</span>')}</td>
           <td style="color:var(--muted)">${escapeHtml(e.realtor || '—')}</td>
         </tr>`).join('')}
       </tbody>
@@ -508,7 +593,7 @@ function openTxDetail(transactionId) {
   if (!tx) return;
 
   const txLabels = { topup: 'Top-up', outright: 'Outright Purchase', installment: 'New Installment' };
-  const docLabels = { invoice: 'Invoice', sales_order: 'Sales Order', receipt_only: 'Receipt Only' };
+  const docLabels = { invoice: 'Invoice', sales_order: 'Sales Order', receipt_only: 'Receipt Only', legacy: 'Legacy (portal only)' };
   const isDocTx = tx.docType === 'invoice' || tx.docType === 'sales_order';
   const resendLabel = isDocTx ? 'Resend Documents (Contract + Deed)' : 'Resend Payment Receipt';
 
@@ -520,30 +605,34 @@ function openTxDetail(transactionId) {
     <div class="detail-header">
       <div>
         <div class="detail-title">${escapeHtml(tx.custName)}</div>
-        <div class="detail-sub">${txLabels[tx.txType] || tx.txType} · ${new Date(tx.timestamp).toLocaleString('en-NG')}</div>
+        <div class="detail-sub">${tx.isLegacy ? 'Legacy Payment' : (txLabels[tx.txType] || tx.txType)} · ${new Date(tx.timestamp).toLocaleString('en-NG')}</div>
       </div>
-      <span class="tx-badge tx-${tx.txType}">${txLabels[tx.txType] || tx.txType}</span>
+      <span class="tx-badge tx-${tx.txType}">${tx.isLegacy ? 'Legacy' : (txLabels[tx.txType] || tx.txType)}</span>
     </div>
     ${row('Customer Email', tx.custEmail ? escapeHtml(tx.custEmail) : '<span style="color:var(--muted)">No email on file</span>')}
     ${row('Property / Item', escapeHtml(tx.propDesc || '—') + (tx.plotSize ? ' · ' + escapeHtml(tx.plotSize) : ''))}
     ${row('Amount Paid', fmt(tx.amtPaid))}
     ${tx.fullPrice ? row('Full Price', fmt(tx.fullPrice)) : ''}
-    ${row('Payment Mode', modeLabel(tx.payMode) + (tx.bankAccountName ? ' · ' + escapeHtml(tx.bankAccountName) : ''))}
-    ${row('Document', (docLabels[tx.docType] || tx.docType) + ': ' + escapeHtml(tx.docNumber || tx.paymentId || '—'))}
+    ${!tx.isLegacy ? row('Payment Mode', modeLabel(tx.payMode) + (tx.bankAccountName ? ' · ' + escapeHtml(tx.bankAccountName) : '')) : ''}
+    ${row('Document', (docLabels[tx.docType] || tx.docType) + (tx.docNumber || tx.paymentId ? ': ' + escapeHtml(tx.docNumber || tx.paymentId) : ''))}
     ${tx.soNumber ? row('Linked Sales Order', escapeHtml(tx.soNumber)) : ''}
-    ${row('Contract Code', tx.contractCode ? `<span style="font-family:'DM Mono',monospace">${escapeHtml(tx.contractCode)}</span>` : '<span style="color:var(--muted)">Not generated</span>')}
-    ${row('Realtor', escapeHtml(tx.realtor || '—') + (tx.realtorEmail ? ' · ' + escapeHtml(tx.realtorEmail) : ''))}
+    ${!tx.isLegacy ? row('Contract Code', tx.contractCode ? `<span style="font-family:'DM Mono',monospace">${escapeHtml(tx.contractCode)}</span>` : '<span style="color:var(--muted)">Not generated</span>') : ''}
+    ${row('Realtor', escapeHtml(tx.realtor || '—') + (tx.realtorEmail && !tx.isLegacy ? ' · ' + escapeHtml(tx.realtorEmail) : ''))}
     ${row('Final Payment', tx.finalPayment ? '<span style="color:var(--gold)">🏁 Yes — full document bundle sent</span>' : '')}
     ${row('Documents Sent', (tx.docsSent || []).length ? escapeHtml(tx.docsSent.join(' · ')) : '')}
-    ${row('Customer Emailed', tx.emailSent
-      ? '<span style="color:var(--green)">✓ Sent</span>'
-      : '<span style="color:var(--red)">✗ Failed' + ((tx.emailErrors || []).length ? ' — ' + escapeHtml(tx.emailErrors.join(' · ')) : '') + '</span>')}
+    ${tx.isLegacy
+      ? row('Portal-Only Entry', '<span style="color:var(--gold)">🗂 Recorded before this portal existed — no Zoho record, no email sent</span>')
+      : row('Customer Emailed', tx.emailSent
+          ? '<span style="color:var(--green)">✓ Sent</span>'
+          : '<span style="color:var(--red)">✗ Failed' + ((tx.emailErrors || []).length ? ' — ' + escapeHtml(tx.emailErrors.join(' · ')) : '') + '</span>')}
     ${row('New Customer', tx.custCreated ? '<span style="color:var(--gold)">Yes — created during this transaction</span>' : '')}
 
     <div id="tx-detail-resend-area" style="margin-top:1.25rem">
-      ${tx.custEmail
-        ? `<button class="log-btn gold" id="tx-detail-resend-btn" onclick="resendContractFromModal('${tx.id}', this)" style="width:100%;justify-content:center;display:flex;align-items:center;gap:6px">${resendLabel}</button>`
-        : '<div style="font-size:12px;color:var(--muted);text-align:center">No customer email on file — add one in Zoho Books before resending.</div>'
+      ${tx.isLegacy
+        ? '<div style="font-size:12px;color:var(--muted);text-align:center">This is a portal-only legacy record — nothing was sent, so there\u2019s nothing to resend.</div>'
+        : (tx.custEmail
+            ? `<button class="log-btn gold" id="tx-detail-resend-btn" onclick="resendContractFromModal('${tx.id}', this)" style="width:100%;justify-content:center;display:flex;align-items:center;gap:6px">${resendLabel}</button>`
+            : '<div style="font-size:12px;color:var(--muted);text-align:center">No customer email on file — add one in Zoho Books before resending.</div>')
       }
     </div>
   `;

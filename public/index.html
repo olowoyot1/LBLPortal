@@ -513,24 +513,31 @@ a{color:var(--gold);text-decoration:none}
           <input type="text" id="plot-size" placeholder="e.g. 3000 square meters"/>
         </div>
         <div id="topup-so-display"></div>
+        <div class="form-row hidden" id="legacy-payment-row" style="display:flex;align-items:flex-start;gap:8px;background:var(--gold-dim);border-radius:8px;padding:10px 12px;margin-top:8px">
+          <input type="checkbox" id="legacy-toggle" onchange="onLegacyToggleChange()"/>
+          <div>
+            <label for="legacy-toggle" style="margin:0;cursor:pointer;display:inline;font-weight:500">Record a legacy/historical payment instead</label>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">For a payment the customer already made before this portal existed. This is a portal-only record — it will <strong>not</strong> touch Zoho and <strong>no email</strong> will be sent, but it will count toward this sales order's balance everywhere it's shown.</div>
+          </div>
+        </div>
         <div class="form-row hidden" id="full-price-row">
           <label id="full-price-label">Full Property Price (NGN) *</label>
           <input type="number" id="full-price" placeholder="e.g. 5000000"/>
         </div>
       </div>
       <div class="card">
-        <div class="card-title">Payment Details</div>
+        <div class="card-title" id="payment-details-title">Payment Details</div>
         <div class="grid2">
           <div class="form-row">
-            <label>Amount Paid (NGN) *</label>
+            <label id="amount-paid-label">Amount Paid (NGN) *</label>
             <input type="number" id="amount-paid" placeholder="e.g. 500000"/>
           </div>
           <div class="form-row">
-            <label>Payment Date *</label>
+            <label id="pay-date-label">Payment Date *</label>
             <input type="date" id="pay-date"/>
           </div>
         </div>
-        <div class="form-row">
+        <div class="form-row" id="pay-mode-row">
           <label>Payment Mode</label>
           <select id="pay-mode" onchange="onPayModeChange()">
             <option value="banktransfer">Bank Transfer</option>
@@ -550,7 +557,7 @@ a{color:var(--gold);text-decoration:none}
           <label>Realtor / Salesperson</label>
           <input type="text" id="salesperson" placeholder="e.g. Daniel"/>
         </div>
-        <div class="form-row">
+        <div class="form-row" id="realtor-emails-row">
           <label>Realtor Email(s) — CC on documents (optional)</label>
           <input type="text" id="realtor-emails" placeholder="e.g. realtor1@email.com, realtor2@email.com"/>
           <div style="font-size:11px;color:var(--muted);margin-top:4px">Comma-separate multiple addresses. They'll be CC'd on every receipt/invoice/sales-order/contract email for this transaction, alongside your own.</div>
@@ -559,7 +566,7 @@ a{color:var(--gold);text-decoration:none}
           <label>Notes (optional)</label>
           <input type="text" id="pay-notes" placeholder="Any additional info..."/>
         </div>
-        <div class="form-row" style="display:flex;align-items:flex-start;gap:8px">
+        <div class="form-row" id="final-payment-row" style="display:flex;align-items:flex-start;gap:8px">
           <input type="checkbox" id="final-payment-toggle"/>
           <div>
             <label for="final-payment-toggle" style="margin:0;cursor:pointer;display:inline">This is the FINAL payment for this property</label>

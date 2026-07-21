@@ -21,12 +21,21 @@ export default async function handler(req, res) {
     const {
       custType, txType, customer, newCust, salesOrder,
       propDesc, plotSize, item, fullPrice, amtPaid, payDate, payMode,
-      bankAccount, salesperson, notes, realtorEmails, finalPayment,
+      bankAccount, salesperson, notes, realtorEmails, finalPayment, legacyPayment,
     } = req.body || {};
 
     if (!txType || !amtPaid || !payDate) {
       return res.status(400).json({ error: 'Missing required payment fields' });
     }
+
+    // A legacy/historical payment records a payment the customer made
+    // BEFORE this portal existed, against a sales order that already
+    // exists in Zoho. It's a portal-only adjustment: no Zoho payment, no
+    // document, no email — just an entry in the local transaction log so
+    // every balance calculation and payment-history table accounts for
+    // it going forward. Only meaningful for top-ups (an existing sales
+    // order must already be selected).
+    const isLegacyEntry = txType === 'topup' && Boolean(legacyPayment);
 
     // Manually-entered realtor email(s) (comma-separated in the form) are
     // combined with the logged-in staff member's own email — everyone who
@@ -78,25 +87,29 @@ export default async function handler(req, res) {
       }
     }
 
-    // Step 2: create payment receipt
+    // Step 2: create payment receipt — skipped entirely for a legacy
+    // entry, since it must never create anything in Zoho.
     const itemLabel = (item?.name || propDesc || salesOrder?.subject || 'property');
     const description = `Payment for ${itemLabel}${notes ? ' — ' + notes : ''}`;
-    const payment = await zoho.createCustomerPayment({
-      customerId,
-      amount: Number(amtPaid),
-      paymentMode: payMode || 'banktransfer',
-      accountId: bankAccount?.account_id,
-      date: payDate,
-      description,
-    });
+    let payment = null;
+    if (!isLegacyEntry) {
+      payment = await zoho.createCustomerPayment({
+        customerId,
+        amount: Number(amtPaid),
+        paymentMode: payMode || 'banktransfer',
+        accountId: bankAccount?.account_id,
+        date: payDate,
+        description,
+      });
 
-    const paymentVerified = await zoho.verifyPaymentExists(payment.payment_id);
-    if (!paymentVerified) {
-      throw new Error('Payment was created but could not be verified in Zoho Books. Please check Zoho directly before retrying.');
+      const paymentVerified = await zoho.verifyPaymentExists(payment.payment_id);
+      if (!paymentVerified) {
+        throw new Error('Payment was created but could not be verified in Zoho Books. Please check Zoho directly before retrying.');
+      }
     }
 
     // Step 3: create matching document
-    let docType = 'receipt_only';
+    let docType = isLegacyEntry ? 'legacy' : 'receipt_only';
     let docId = null;
     let docNumber = null;
     let emailSent = false;
@@ -108,9 +121,11 @@ export default async function handler(req, res) {
     // detected automatically (balance reaches zero) or forced via the
     // "final payment" toggle in the form. Drives whether the full
     // document bundle (Contract of Sale + Deed of Assignment, and for
-    // top-ups the sales order itself) goes out with this payment.
+    // top-ups the sales order itself) goes out with this payment. Never
+    // applies to a legacy entry — it never triggers document sending
+    // regardless of the resulting balance.
     let isFinalPayment = false;
-    let docsSent = ['Payment Receipt'];
+    let docsSent = isLegacyEntry ? ['Legacy Payment Recorded (portal only)'] : ['Payment Receipt'];
 
     if (txType === 'outright') {
       isFinalPayment = true;
@@ -177,25 +192,28 @@ export default async function handler(req, res) {
       if (!verified) throw new Error('Sales order was created but could not be verified. Check Zoho Books directly.');
       docType = 'sales_order'; docId = so.salesorder_id; docNumber = so.salesorder_number;
 
-      // Generate and attach the customized Contract of Sale — every sale
-      // gets this. The Deed of Conveyance only goes out if this
-      // installment sale happens to be fully settled from day one — the
-      // very first deposit already covers the full price, or the "final
-      // payment" toggle was ticked. Otherwise the deed waits for the
-      // balance to actually reach zero (see the top-up branch below).
+      // Unlike outright sales, a fresh installment plan does NOT get the
+      // Contract of Sale or Deed of Conveyance by default — only the
+      // Sales Order (plus the payment receipt, sent to every transaction
+      // type further down). The Contract + Deed only go out once this
+      // property is actually fully paid for: either the very first
+      // deposit already covers the full price, or the "final payment"
+      // toggle was ticked. From then on it behaves exactly like a top-up
+      // reaching zero balance (see the top-up branch below).
       isFinalPayment = Boolean(finalPayment) || Number(amtPaid) >= Number(fullPrice);
-      try {
-        contractCode = await generateContractCode(payDate);
-        const contractPdf = await buildContractPdf({
-          customerName, customerAddress, propertyDescription: itemLabel, plotSize,
-          fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
-          contractDate: payDate, documentNumber: so.salesorder_number, contractCode,
-          deedAttached: isFinalPayment,
-        });
-        await attachContract({ docKind: 'salesorder', docId: so.salesorder_id, contractPdf });
-        docsSent.push('Sales Order', 'Contract of Sale');
+      docsSent.push('Sales Order');
+      if (isFinalPayment) {
+        try {
+          contractCode = await generateContractCode(payDate);
+          const contractPdf = await buildContractPdf({
+            customerName, customerAddress, propertyDescription: itemLabel, plotSize,
+            fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
+            contractDate: payDate, documentNumber: so.salesorder_number, contractCode,
+            deedAttached: true,
+          });
+          await attachContract({ docKind: 'salesorder', docId: so.salesorder_id, contractPdf });
+          docsSent.push('Contract of Sale');
 
-        if (isFinalPayment) {
           const deedPdf = await buildDeedOfAssignmentPdf({
             customerName, customerAddress, propertyDescription: itemLabel, plotSize,
             considerationAmount: Number(fullPrice),
@@ -203,19 +221,22 @@ export default async function handler(req, res) {
           });
           await attachDeed({ docKind: 'salesorder', docId: so.salesorder_id, deedPdf });
           docsSent.push('Deed of Conveyance');
+        } catch (e) {
+          emailErrors.push(`Contract generation: ${e.message}`);
         }
-      } catch (e) {
-        emailErrors.push(`Contract generation: ${e.message}`);
       }
 
       // Send the sales order to the customer (emails their copy, CC'd to
       // the realtor(s) — the logged-in staff member plus any
       // manually-entered realtor emails) and explicitly mark it as Open —
       // sales orders use Draft/Open/Closed/Void in Zoho Books (not
-      // "sent"). Done independently so a failed email doesn't leave the
-      // order stuck in Draft.
+      // "sent"). sendAttachment only true when the Contract of Sale was
+      // actually attached above, so the email subject/body don't
+      // misleadingly claim a contract is attached when it isn't. Done
+      // independently so a failed email doesn't leave the order stuck in
+      // Draft.
       try {
-        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, ccEmail: ccList, salesorderNumber: so.salesorder_number, sendAttachment: true, contractCode });
+        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, ccEmail: ccList, salesorderNumber: so.salesorder_number, sendAttachment: isFinalPayment, contractCode });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Sales order email: ${e.message}`);
@@ -272,8 +293,10 @@ export default async function handler(req, res) {
       // this is the moment the full document bundle — a freshly-generated
       // Contract of Sale reflecting full settlement, plus the Deed of
       // Assignment — goes out on the original sales order, and the order
-      // is closed out.
-      isFinalPayment = Boolean(finalPayment) || soRemainingBalance <= 0;
+      // is closed out. A legacy entry NEVER triggers this, even if it
+      // happens to bring the balance to zero — it's a portal-only record
+      // of something that already happened, not a live payment event.
+      isFinalPayment = !isLegacyEntry && (Boolean(finalPayment) || soRemainingBalance <= 0);
       if (isFinalPayment) {
         try {
           const originalTx = priorPayments.find((t) => t.docType === 'sales_order');
@@ -326,25 +349,34 @@ export default async function handler(req, res) {
       }
     }
 
-    // Every transaction — receipt-only top-ups included — emails the
-    // customer their payment receipt. Top-ups additionally get the full
-    // payment-history table embedded in the email body.
-    try {
-      await zoho.sendPaymentReceiptEmail(payment.payment_id, {
-        email: customerEmail,
-        ccEmail: ccList,
-        paymentNumber: payment.payment_number,
-        extraBodyHtml: paymentHistoryHtml,
-      });
-      emailSent = true;
-    } catch (e) {
-      emailErrors.push(`Receipt email: ${e.message}`);
+    // Every transaction gets a payment receipt emailed to the customer —
+    // except a legacy entry, which must never send any email at all.
+    // Top-ups additionally get the full payment-history table embedded
+    // in the email body.
+    if (!isLegacyEntry) {
+      try {
+        await zoho.sendPaymentReceiptEmail(payment.payment_id, {
+          email: customerEmail,
+          ccEmail: ccList,
+          paymentNumber: payment.payment_number,
+          extraBodyHtml: paymentHistoryHtml,
+        });
+        emailSent = true;
+      } catch (e) {
+        emailErrors.push(`Receipt email: ${e.message}`);
+      }
     }
 
     // Step 4: append to transaction log in KV
     const entry = {
       id: `tx_${Date.now()}`,
-      timestamp: new Date().toISOString(),
+      // A legacy entry's timestamp IS the historical payment date the
+      // realtor entered — that's what makes it sort correctly into the
+      // payment-history table and show the right date everywhere else.
+      // Every other transaction type keeps the actual processing time.
+      timestamp: isLegacyEntry ? new Date(payDate).toISOString() : new Date().toISOString(),
+      recordedAt: new Date().toISOString(),
+      isLegacy: isLegacyEntry,
       realtor: session.displayName,
       realtorUsername: session.username,
       realtorEmail: realtorEmailForLog,
@@ -357,13 +389,13 @@ export default async function handler(req, res) {
       plotSize: plotSize || '',
       amtPaid: Number(amtPaid),
       fullPrice: Number(fullPrice || 0),
-      payMode,
-      bankAccountName: bankAccount?.account_name || '',
+      payMode: isLegacyEntry ? 'legacy' : payMode,
+      bankAccountName: isLegacyEntry ? '' : (bankAccount?.account_name || ''),
       docType,
       docId,
       docNumber,
       contractCode,
-      paymentId: payment.payment_id,
+      paymentId: payment ? payment.payment_id : null,
       soNumber: txType === 'topup' ? salesOrder.salesorder_number : null,
       finalPayment: isFinalPayment,
       docsSent,

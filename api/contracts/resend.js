@@ -41,6 +41,12 @@ export default async function handler(req, res) {
     // resend reaches the same people as the original send did.
     const ccEmail = tx.realtorEmail || session.email || '';
 
+    // ── Legacy entries: nothing was ever sent (portal-only record), so
+    // there's nothing to resend. ──
+    if (tx.docType === 'legacy' || tx.isLegacy) {
+      return res.status(400).json({ error: 'This is a manually recorded legacy payment — no email was ever sent for it, so there\u2019s nothing to resend.' });
+    }
+
     // ── Top-ups: resend the payment receipt (with its payment-history
     // table rebuilt from the current log) — there's no invoice/sales
     // order attached directly to a top-up itself. ──

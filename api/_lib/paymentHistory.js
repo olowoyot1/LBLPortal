@@ -17,6 +17,7 @@ const MODE_LABELS = {
   creditcard: 'Credit Card',
   cheque: 'Cheque',
   others: 'Others',
+  legacy: 'Legacy / Pre-Portal',
 };
 
 /**
