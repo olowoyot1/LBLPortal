@@ -19,11 +19,9 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const VENDOR_NAME = 'LANDBLAZE LIMITED';
-// NOTE: this is the address used on Landblaze's own Deed of Conveyance
-// template — it differs from the address used on the Contract of Sale
-// (api/_lib/contract.js). Both are reproduced as given; flag to Daniel if
-// one of them is out of date and should be made consistent.
-const VENDOR_ADDRESS = 'C2, C6 5th Avenue, Divine Plaza, Egbeda, Lagos';
+// Company address (both office locations, listed together) — kept in sync
+// with the same value used in api/_lib/contract.js.
+const VENDOR_ADDRESS = 'Block A, No 812 HFP, Abraham Adesanya, Lekki, Lagos State and No 8 Wasiu Opako Adigbe, Abeokuta, Ogun State';
 const VENDOR_RC_NUMBER = 'RC 8102989';
 const PREPARED_BY = [
   'LANDBLAZE LIMITED',

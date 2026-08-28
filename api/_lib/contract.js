@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VENDOR_NAME = 'LANDBLAZE LIMITED';
-const VENDOR_ADDRESS = 'Wasiu Adesina Avenue, Opako, Adigbe, Abeokuta, Ogun State';
+const VENDOR_ADDRESS = 'Block A, No 812 HFP, Abraham Adesanya, Lekki, Lagos State and No 8 Wasiu Opako Adigbe, Abeokuta, Ogun State';
 
 // The vendor's signature is stamped automatically on every contract from a
 // committed image file rather than left blank for manual signing. Missing
