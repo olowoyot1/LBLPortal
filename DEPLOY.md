@@ -91,3 +91,19 @@ The `refresh_token` in the response is what goes in your Vercel env vars. It doe
 - **Bank account dropdown filtered**: `GET /api/bank-accounts` now only returns Providus Bank, Zenith Bank, and Titan Bank — the org's other ~17 internal bookkeeping accounts (Allocation, Commission, Petty Cash, Providus USD, Undeposited Funds, etc.) are filtered out. No env var needed; the allowed list is in `api/_lib/zoho.js` (`ALLOWED_BANK_NAMES`) if it ever needs to change.
 
 No new environment variables are required for any of this — only two new npm dependencies (`pdfkit`, `form-data`), already in `package.json`.
+
+## Verify the historical-payment build is live
+
+This release is **v2.1.0** and includes **Update Payment History**. After deployment, select **Existing customer** (or **New customer**) on Step 1. After a customer is selected, the **↻ Update Payment History** button appears beside Continue.
+
+If the button is missing, the live domain is serving an older deployment. Vercel's production deployment is created from the configured production branch after a push/merge, or you can deploy directly with `vercel --prod`.
+
+For a clean production deployment from this folder:
+
+```bash
+npm install
+vercel link
+vercel --prod --force
+```
+
+Then open the production domain in a fresh/incognito window and verify the version badge shows **v2.1.0**. The frontend script URLs are versioned and `index.html`, `app.js`, and `config.js` are configured not to be cached, reducing stale-browser/static-asset issues.

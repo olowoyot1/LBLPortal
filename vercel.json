@@ -1,23 +1,89 @@
 {
   "rewrites": [
-    { "source": "/api/bank-accounts", "destination": "/api/zoho-data/bank-accounts" },
-    { "source": "/api/customers", "destination": "/api/zoho-data/customers" },
-    { "source": "/api/items", "destination": "/api/zoho-data/items" },
-    { "source": "/api/sales-orders", "destination": "/api/zoho-data/sales-orders" },
-    { "source": "/api/setup", "destination": "/api/staff/setup" },
-    { "source": "/api/health", "destination": "/api/staff/health" },
-    { "source": "/api/staff", "destination": "/api/staff/manage" },
-    { "source": "/api/license", "destination": "/api/staff/license" },
-    { "source": "/((?!api/).*)", "destination": "/public/$1" }
+    {
+      "source": "/api/bank-accounts",
+      "destination": "/api/zoho-data/bank-accounts"
+    },
+    {
+      "source": "/api/customers",
+      "destination": "/api/zoho-data/customers"
+    },
+    {
+      "source": "/api/items",
+      "destination": "/api/zoho-data/items"
+    },
+    {
+      "source": "/api/sales-orders",
+      "destination": "/api/zoho-data/sales-orders"
+    },
+    {
+      "source": "/api/setup",
+      "destination": "/api/staff/setup"
+    },
+    {
+      "source": "/api/health",
+      "destination": "/api/staff/health"
+    },
+    {
+      "source": "/api/staff",
+      "destination": "/api/staff/manage"
+    },
+    {
+      "source": "/api/license",
+      "destination": "/api/staff/license"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/public/$1"
+    }
   ],
   "headers": [
     {
       "source": "/api/(.*)",
       "headers": [
-        { "key": "Access-Control-Allow-Credentials", "value": "true" },
-        { "key": "Access-Control-Allow-Origin", "value": "$FRONTEND_ORIGIN" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,DELETE,OPTIONS" },
-        { "key": "Access-Control-Allow-Headers", "value": "Content-Type" }
+        {
+          "key": "Access-Control-Allow-Credentials",
+          "value": "true"
+        },
+        {
+          "key": "Access-Control-Allow-Origin",
+          "value": "$FRONTEND_ORIGIN"
+        },
+        {
+          "key": "Access-Control-Allow-Methods",
+          "value": "GET,POST,PUT,DELETE,OPTIONS"
+        },
+        {
+          "key": "Access-Control-Allow-Headers",
+          "value": "Content-Type"
+        }
+      ]
+    },
+    {
+      "source": "/",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
+      ]
+    },
+    {
+      "source": "/app.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
+      ]
+    },
+    {
+      "source": "/config.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, max-age=0"
+        }
       ]
     }
   ]
