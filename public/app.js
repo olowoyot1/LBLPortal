@@ -113,9 +113,9 @@ function setCustType(t) {
   el('btn-existing').classList.toggle('active', t === 'existing');
   el('btn-new').classList.toggle('active', t === 'new');
   if (t === 'existing') {
-    show('existing-search'); hide('new-cust-form'); el('next1').disabled = !S.customer;
+    show('existing-search'); hide('new-cust-form'); el('next1').disabled = !S.customer; if (el('history-btn')) el('history-btn').disabled = !S.customer;
   } else {
-    hide('existing-search'); show('new-cust-form'); el('next1').disabled = false; S.customer = null;
+    hide('existing-search'); show('new-cust-form'); el('next1').disabled = false; if (el('history-btn')) el('history-btn').disabled = false; S.customer = null;
   }
 }
 
@@ -159,10 +159,194 @@ function selectCustomer(c) {
   document.querySelectorAll('#existing-search .result-item').forEach((x) => x.classList.remove('selected'));
   const t = el('cr-' + c.customer_id); if (t) t.classList.add('selected');
   el('next1').disabled = false;
+  if (el('history-btn')) el('history-btn').disabled = false;
+}
+
+// ── HISTORICAL PAYMENT BACKFILL ──
+let historyItemsCache = [];
+let historyBanksCache = [];
+let historyRows = [];
+
+async function ensureHistoryCustomer() {
+  if (S.customer?.customer_id) return S.customer;
+  if (S.custType !== 'new') throw new Error('Please select a customer first.');
+
+  const name = el('new-name').value.trim();
+  const email = el('new-email').value.trim();
+  const phone = el('new-phone').value.trim();
+  const address = el('new-address').value.trim();
+  const missing = [];
+  if (!name) missing.push('Full Name');
+  if (!email) missing.push('Email');
+  if (!phone) missing.push('Phone');
+  if (!address) missing.push('Address');
+  if (missing.length) throw new Error(`Please fill in: ${missing.join(', ')}`);
+  if (!/^\S+@\S+\.\S+$/.test(email)) throw new Error('Please enter a valid email address.');
+
+  const created = await api('/api/customers', {
+    method: 'POST',
+    body: JSON.stringify({ name, email, phone, address }),
+  });
+  S.customer = { ...created, isNew: true };
+  S.newCust = { name, email, phone, address };
+  return S.customer;
+}
+
+async function openHistoryForSelectedCustomer() {
+  const btn = el('history-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Opening...'; }
+  try {
+    const customer = await ensureHistoryCustomer();
+    await loadHistoryLookups();
+    historyRows = [{ amount: '', date: new Date().toISOString().split('T')[0], itemId: '', bankAccountId: '', paymentMode: 'banktransfer', referenceNumber: '', notes: '' }];
+    renderHistoryModal(customer);
+    el('history-modal').classList.remove('hidden');
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    if (btn) { btn.disabled = !S.customer; btn.innerHTML = '↻ Update Payment History'; }
+  }
+}
+
+async function loadHistoryLookups() {
+  if (!historyBanksCache.length) historyBanksCache = await api('/api/bank-accounts');
+  if (!historyItemsCache.length) historyItemsCache = await api('/api/items');
+}
+
+function closeHistoryModal() {
+  el('history-modal').classList.add('hidden');
+}
+
+function addHistoryRow() {
+  historyRows.push({ amount: '', date: new Date().toISOString().split('T')[0], itemId: '', bankAccountId: '', paymentMode: 'banktransfer', referenceNumber: '', notes: '' });
+  renderHistoryModal(S.customer);
+}
+
+function removeHistoryRow(index) {
+  historyRows.splice(index, 1);
+  if (!historyRows.length) historyRows.push({ amount: '', date: new Date().toISOString().split('T')[0], itemId: '', bankAccountId: '', paymentMode: 'banktransfer', referenceNumber: '', notes: '' });
+  renderHistoryModal(S.customer);
+}
+
+function syncHistoryRow(index) {
+  const r = historyRows[index];
+  r.amount = el(`hist-amount-${index}`).value;
+  r.date = el(`hist-date-${index}`).value;
+  r.itemId = el(`hist-item-${index}`).value;
+  r.bankAccountId = el(`hist-bank-${index}`).value;
+  r.paymentMode = el(`hist-mode-${index}`).value;
+  r.referenceNumber = el(`hist-ref-${index}`).value.trim();
+  r.notes = el(`hist-notes-${index}`).value.trim();
+  const item = historyItemsCache.find(i => i.item_id === r.itemId);
+  const bank = historyBanksCache.find(b => b.account_id === r.bankAccountId);
+  r.itemName = item?.name || '';
+  r.bankAccountName = bank?.account_name || '';
+}
+
+function syncAllHistoryRows() { historyRows.forEach((_, i) => syncHistoryRow(i)); }
+
+function renderHistoryModal(customer) {
+  const itemOptions = historyItemsCache.map(i => `<option value="${escapeHtml(i.item_id)}">${escapeHtml(i.name)}${i.rate ? ' · ' + fmt(i.rate) : ''}</option>`).join('');
+  const bankOptions = historyBanksCache.map(b => `<option value="${escapeHtml(b.account_id)}">${escapeHtml(b.account_name)}</option>`).join('');
+  const total = historyRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+
+  el('history-body').innerHTML = `
+    <div class="detail-header">
+      <div>
+        <div class="detail-title">Update Payment History</div>
+        <div class="detail-sub">${escapeHtml(customer?.customer_name || '')} · ${escapeHtml(customer?.customer_id || '')}</div>
+      </div>
+      <span class="badge badge-open">Zoho Books</span>
+    </div>
+    <div class="info-box" style="margin-bottom:14px">
+      Enter payments the customer made <strong>before this portal was deployed</strong>. Each row will create a real, backdated <strong>Sales Receipt in Zoho Books</strong>, posted to the selected bank account and income account through the selected item. No customer email is sent automatically.
+    </div>
+    <div style="overflow-x:auto">
+      <table class="log-table" style="min-width:700px">
+        <thead><tr><th>Amount *</th><th>Date *</th><th>Item *</th><th>Paid Into *</th><th>Mode</th><th>Reference</th><th>Notes</th><th></th></tr></thead>
+        <tbody>
+          ${historyRows.map((r, i) => `
+            <tr>
+              <td><input id="hist-amount-${i}" type="number" min="0.01" step="0.01" value="${escapeHtml(r.amount)}" placeholder="0.00" style="width:120px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)" oninput="historyRows[${i}].amount=this.value; updateHistoryTotal()"/></td>
+              <td><input id="hist-date-${i}" type="date" value="${escapeHtml(r.date)}" style="width:135px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"/></td>
+              <td><select id="hist-item-${i}" style="width:190px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"><option value="">Select item</option>${itemOptions}</select></td>
+              <td><select id="hist-bank-${i}" style="width:155px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"><option value="">Select bank</option>${bankOptions}</select></td>
+              <td><select id="hist-mode-${i}" style="width:120px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"><option value="banktransfer">Bank Transfer</option><option value="cash">Cash</option><option value="cheque">Cheque</option><option value="creditcard">Card</option><option value="others">Other</option></select></td>
+              <td><input id="hist-ref-${i}" type="text" value="${escapeHtml(r.referenceNumber || '')}" placeholder="Optional" style="width:130px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"/></td>
+              <td><input id="hist-notes-${i}" type="text" value="${escapeHtml(r.notes || '')}" placeholder="Optional" style="width:150px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"/></td>
+              <td><button class="log-btn" onclick="removeHistoryRow(${i})" title="Remove row">×</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding:10px 0;border-top:0.5px solid var(--border)">
+      <div><span style="font-size:11px;color:var(--muted)">Total to post</span><div id="history-total" style="font-family:'DM Mono',monospace;font-size:16px;color:var(--gold)">${fmt(total)}</div></div>
+      <button class="log-btn" onclick="addHistoryRow()">+ Add Payment</button>
+    </div>
+    <div id="history-error" class="hidden err-box"></div>
+    <div id="history-results" style="margin-top:12px"></div>
+    <div class="action-bar">
+      <button class="btn-back" onclick="closeHistoryModal()">Cancel</button>
+      <button class="btn-next" id="post-history-btn" onclick="postHistoryPayments()">Post All to Zoho ✓</button>
+    </div>`;
+
+  historyRows.forEach((r, i) => {
+    if (el(`hist-item-${i}`)) el(`hist-item-${i}`).value = r.itemId || '';
+    if (el(`hist-bank-${i}`)) el(`hist-bank-${i}`).value = r.bankAccountId || '';
+    if (el(`hist-mode-${i}`)) el(`hist-mode-${i}`).value = r.paymentMode || 'banktransfer';
+  });
+}
+
+function updateHistoryTotal() {
+  const total = historyRows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
+  if (el('history-total')) el('history-total').textContent = fmt(total);
+}
+
+async function postHistoryPayments() {
+  syncAllHistoryRows();
+  const invalid = historyRows.findIndex(r => !Number(r.amount) || Number(r.amount) <= 0 || !r.date || !r.itemId || !r.bankAccountId);
+  if (invalid >= 0) {
+    el('history-error').className = 'err-box';
+    el('history-error').textContent = `Please complete Amount, Date, Item and Bank Account on row ${invalid + 1}.`;
+    return;
+  }
+  const btn = el('post-history-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Posting...';
+  hide('history-error');
+  try {
+    const result = await api('/api/history', {
+      method: 'POST',
+      body: JSON.stringify({ customer: S.customer, rows: historyRows }),
+    });
+    const successful = (result.results || []).filter(r => r.ok);
+    const failed = (result.results || []).filter(r => !r.ok);
+    el('history-results').innerHTML = `
+      <div class="info-box" style="color:${failed.length ? 'var(--gold)' : 'var(--green)'}">
+        <strong>${result.posted} payment(s) posted to Zoho Books.</strong>${failed.length ? ` ${failed.length} failed and can be retried.` : ''}
+        ${successful.length ? `<div style="margin-top:6px">Receipts: ${successful.map(r => escapeHtml(r.receiptNumber)).join(', ')}</div>` : ''}
+      </div>
+      ${failed.length ? `<div class="err-box" style="margin-top:8px">${failed.map(r => `Row ${r.row + 1}: ${escapeHtml(r.error)}`).join('<br>')}</div>` : ''}`;
+    if (!failed.length) {
+      btn.innerHTML = '✓ Posted to Zoho Books';
+      setTimeout(() => closeHistoryModal(), 1800);
+    } else {
+      // Keep failed rows in the form; successful rows are removed so clicking Post again cannot duplicate them.
+      historyRows = historyRows.filter((_, i) => failed.some(r => r.row === i));
+      btn.disabled = false; btn.innerHTML = 'Post Remaining to Zoho ✓';
+      renderHistoryModal(S.customer);
+      el('history-results').innerHTML = `
+        <div class="info-box" style="color:var(--gold)"><strong>${successful.length} posted; ${failed.length} failed.</strong> Only failed rows remain above for correction/retry.</div>
+        <div class="err-box" style="margin-top:8px">${failed.map(r => `Row ${r.row + 1}: ${escapeHtml(r.error)}`).join('<br>')}</div>`;
+    }
+  } catch (e) {
+    el('history-error').className = 'err-box';
+    el('history-error').textContent = e.message;
+    btn.disabled = false; btn.innerHTML = 'Post All to Zoho ✓';
+  }
 }
 
 function goStep2() {
-  if (S.custType === 'new') {
+  if (S.custType === 'new' && !S.customer?.customer_id) {
     const name = el('new-name').value.trim();
     const email = el('new-email').value.trim();
     const phone = el('new-phone').value.trim();
@@ -176,6 +360,7 @@ function goStep2() {
     if (!/^\S+@\S+\.\S+$/.test(email)) { alert('Please enter a valid email address.'); return; }
     S.newCust = { name, email, phone, address };
     S.customer = { customer_name: name, email, phone, isNew: true };
+    if (el('history-btn')) el('history-btn').disabled = false;
   }
   if (!S.customer) { alert('Please select or create a customer'); return; }
   S.txType = null; S.salesOrder = null;
@@ -533,6 +718,7 @@ function resetPayment() {
   ['btn-topup', 'btn-outright', 'btn-installment'].forEach((b) => el(b).classList.remove('active'));
   hide('existing-search'); hide('new-cust-form'); hide('so-picker');
   el('next1').disabled = true;
+  if (el('history-btn')) el('history-btn').disabled = true;
   el('search-name').value = ''; el('search-results').innerHTML = ''; el('so-list').innerHTML = ''; el('item-results').innerHTML = '';
   ['new-name', 'new-email', 'new-phone', 'new-address', 'prop-desc', 'plot-size', 'full-price', 'amount-paid', 'salesperson', 'realtor-emails', 'pay-notes'].forEach((id) => { if (el(id)) el(id).value = ''; });
   if (el('final-payment-toggle')) el('final-payment-toggle').checked = false;
@@ -576,7 +762,7 @@ async function renderLog() {
     return;
   }
 
-  const txLabels = { topup: 'Top-up', outright: 'Outright', installment: 'Installment' };
+  const txLabels = { topup: 'Top-up', outright: 'Outright', installment: 'Installment', historical: 'Historical' };
   el('log-body').innerHTML = `
     <table class="log-table">
       <thead><tr>
@@ -601,7 +787,7 @@ function openTxDetail(transactionId) {
   const tx = logCache.find((t) => t.id === transactionId);
   if (!tx) return;
 
-  const txLabels = { topup: 'Top-up', outright: 'Outright Purchase', installment: 'New Installment' };
+  const txLabels = { topup: 'Top-up', outright: 'Outright Purchase', installment: 'New Installment', historical: 'Historical Payment' };
   const docLabels = { invoice: 'Legacy Invoice', sales_order: 'Sales Order', sales_receipt: 'Sales Receipt', receipt_only: 'Legacy Receipt Only', legacy: 'Legacy (portal only)' };
   const isDocTx = tx.docType === 'invoice' || tx.docType === 'sales_order' || tx.docType === 'sales_receipt';
   const resendLabel = isDocTx ? (tx.docType === 'sales_receipt' ? 'Resend Sales Receipt' : 'Resend Documents (Contract + Deed)') : 'Resend Payment Receipt';
@@ -624,6 +810,8 @@ function openTxDetail(transactionId) {
     ${tx.fullPrice ? row('Full Price', fmt(tx.fullPrice)) : ''}
     ${!tx.isLegacy ? row('Payment Mode', modeLabel(tx.payMode) + (tx.bankAccountName ? ' · ' + escapeHtml(tx.bankAccountName) : '')) : ''}
     ${row('Document', (docLabels[tx.docType] || tx.docType) + (tx.docNumber || tx.paymentId ? ': ' + escapeHtml(tx.docNumber || tx.paymentId) : ''))}
+    ${tx.referenceNumber ? row('Reference', escapeHtml(tx.referenceNumber)) : ''}
+    ${tx.notes ? row('Notes', escapeHtml(tx.notes)) : ''}
     ${tx.soNumber ? row('Linked Sales Order', escapeHtml(tx.soNumber)) : ''}
     ${!tx.isLegacy ? row('Contract Code', tx.contractCode ? `<span style="font-family:'DM Mono',monospace">${escapeHtml(tx.contractCode)}</span>` : '<span style="color:var(--muted)">Not generated</span>') : ''}
     ${row('Realtor', escapeHtml(tx.realtor || '—') + (tx.realtorEmail && !tx.isLegacy ? ' · ' + escapeHtml(tx.realtorEmail) : ''))}
@@ -688,14 +876,14 @@ async function exportCSV() {
   let log = [];
   try { log = await api('/api/transactions'); } catch (e) { alert(e.message); return; }
   if (!log.length) { alert('No transactions to export.'); return; }
-  const headers = ['Timestamp', 'Realtor', 'Realtor Email(s)', 'Customer', 'Customer ID', 'Customer Email', 'New Customer', 'Tx Type', 'Property', 'Amount Paid', 'Full Price', 'Payment Mode', 'Bank Account', 'Document Type', 'Document Number', 'Payment ID', 'SO Number', 'Final Payment', 'Documents Sent', 'Emailed'];
+  const headers = ['Timestamp', 'Realtor', 'Realtor Email(s)', 'Customer', 'Customer ID', 'Customer Email', 'New Customer', 'Tx Type', 'Property', 'Amount Paid', 'Full Price', 'Payment Mode', 'Bank Account', 'Document Type', 'Document Number', 'Payment ID', 'SO Number', 'Final Payment', 'Documents Sent', 'Emailed', 'Historical', 'Reference', 'Notes'];
   const rows = log.map((e) => [
     new Date(e.timestamp).toLocaleString('en-NG'),
     e.realtor, e.realtorEmail || '', e.custName, e.custId, e.custEmail || '', e.custCreated ? 'Yes' : 'No',
     e.txType, e.propDesc || '', e.amtPaid, e.fullPrice || '',
     modeLabel(e.payMode), e.bankAccountName || '', e.docType || '',
     e.docNumber || '', e.paymentId || '', e.soNumber || '',
-    e.finalPayment ? 'Yes' : 'No', (e.docsSent || []).join(' | '), e.emailSent ? 'Yes' : 'No'
+    e.finalPayment ? 'Yes' : 'No', (e.docsSent || []).join(' | '), e.emailSent ? 'Yes' : 'No', e.isHistorical ? 'Yes' : 'No', e.referenceNumber || '', e.notes || ''
   ].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','));
   const csv = [headers.join(','), ...rows].join('\n');
   const a = document.createElement('a');

@@ -465,6 +465,7 @@ a{color:var(--gold);text-decoration:none}
         <div style="font-size:11px;color:var(--muted);margin-top:4px">All fields are required — email and phone are needed to send the customer their receipt, invoice, or sales order.</div>
       </div>
       <div class="action-bar">
+        <button class="btn-outline" id="history-btn" onclick="openHistoryForSelectedCustomer()" disabled style="margin-top:0;flex:1">↻ Update Payment History</button>
         <button class="btn-next" id="next1" onclick="goStep2()" disabled>Continue →</button>
       </div>
     </div>
@@ -610,6 +611,15 @@ a{color:var(--gold);text-decoration:none}
     <div class="log-stats" id="log-stats"></div>
     <div class="log-card">
       <div id="log-body"></div>
+    </div>
+  </div>
+
+
+  <!-- HISTORICAL PAYMENT BACKFILL MODAL -->
+  <div class="modal-overlay hidden" id="history-modal" onclick="if(event.target===this) closeHistoryModal()">
+    <div class="modal-card" style="max-width:760px">
+      <div class="modal-close" onclick="closeHistoryModal()">&times;</div>
+      <div id="history-body"></div>
     </div>
   </div>
 

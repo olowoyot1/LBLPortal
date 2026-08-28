@@ -49,7 +49,21 @@ export default async function handler(req, res) {
 
     // Step 1: resolve customer
     let customerId, customerName, customerEmail, customerAddress = '', customerCreated = false;
-    if (custType === 'new') {
+    if (custType === 'new' && customer?.customer_id) {
+      // The Update Payment History flow may create the new customer before
+      // the user continues with a normal transaction. Reuse that customer
+      // instead of creating a duplicate contact in Zoho Books.
+      customerId = customer.customer_id;
+      customerName = customer.customer_name;
+      customerEmail = customer.email || '';
+      customerCreated = true;
+      try {
+        const full = await zoho.getContact(customerId);
+        customerAddress = full.address || '';
+      } catch (e) {
+        customerAddress = newCust?.address?.trim() || '';
+      }
+    } else if (custType === 'new') {
       const missing = [];
       if (!newCust?.name?.trim()) missing.push('name');
       if (!newCust?.email?.trim()) missing.push('email');
