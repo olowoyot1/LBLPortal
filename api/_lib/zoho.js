@@ -507,14 +507,32 @@ export async function createSalesReceipt({
   };
 
   const data = await zohoRequest('post', '/salesreceipts', { data: payload });
-  if (!data.salesreceipt?.sales_receipt_id) {
+
+  // Zoho's create response can return the receipt inside
+  // `sales_receipt_details` (the current API response shape) rather than
+  // the older `salesreceipt` envelope. Accept both shapes so a successfully
+  // created receipt is never reported as a failure.
+  const details = data?.sales_receipt_details || data?.salesreceipt || data?.sales_receipt || null;
+  const salesReceiptId = details?.sales_receipt_id;
+  if (!salesReceiptId) {
     throw new Error(`Sales receipt creation did not return a sales_receipt_id: ${JSON.stringify(data)}`);
   }
 
   return {
-    sales_receipt_id: data.salesreceipt.sales_receipt_id,
-    receipt_number: data.salesreceipt.receipt_number,
+    sales_receipt_id: salesReceiptId,
+    receipt_number: details?.receipt_number || '',
   };
+}
+
+export async function findSalesReceiptByReference(referenceNumber) {
+  if (!referenceNumber) return null;
+  const qs = new URLSearchParams({
+    reference_number: referenceNumber,
+    per_page: '10',
+  });
+  const data = await zohoRequest('get', `/salesreceipts?${qs.toString()}`);
+  const receipts = data?.salesreceipts || [];
+  return receipts.find((r) => r.reference_number === referenceNumber) || null;
 }
 
 export async function verifySalesReceiptExists(salesReceiptId) {

@@ -272,8 +272,8 @@ function renderHistoryModal(customer) {
               <td><select id="hist-item-${i}" style="width:190px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"><option value="">Select item</option>${itemOptions}</select></td>
               <td><select id="hist-bank-${i}" style="width:155px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"><option value="">Select bank</option>${bankOptions}</select></td>
               <td><select id="hist-mode-${i}" style="width:120px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"><option value="banktransfer">Bank Transfer</option><option value="cash">Cash</option><option value="cheque">Cheque</option><option value="creditcard">Card</option><option value="others">Other</option></select></td>
-              <td><input id="hist-ref-${i}" type="text" value="${escapeHtml(r.referenceNumber || '')}" placeholder="Optional" style="width:130px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"/></td>
-              <td><input id="hist-notes-${i}" type="text" value="${escapeHtml(r.notes || '')}" placeholder="Optional" style="width:150px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"/></td>
+              <td><input id="hist-ref-${i}" readonly title="Generated automatically when posted" type="text" value="${escapeHtml(r.referenceNumber || '')}" placeholder="Generated automatically" style="width:130px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"/></td>
+              <td><input id="hist-notes-${i}" type="text" value="${escapeHtml(r.notes || '')}" placeholder="Generated automatically" style="width:150px;background:#0f0f0f;border:0.5px solid #252525;border-radius:6px;padding:8px;color:var(--text)"/></td>
               <td><button class="log-btn" onclick="removeHistoryRow(${i})" title="Remove row">×</button></td>
             </tr>`).join('')}
         </tbody>

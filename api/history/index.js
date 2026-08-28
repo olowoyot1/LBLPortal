@@ -20,6 +20,23 @@ function cleanRow(row) {
   };
 }
 
+function stableHash(input) {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36).toUpperCase().padStart(7, '0');
+}
+
+function makeReference(customerId, row, duplicateOrdinal = 1) {
+  const fingerprint = [
+    customerId, row.date, row.amount.toFixed(2), row.itemId || row.itemName,
+    row.bankAccountId, row.paymentMode, row.notes
+  ].join('|');
+  return `LBP-HIST-${stableHash(fingerprint)}-${String(duplicateOrdinal).padStart(2, '0')}`;
+}
+
 function validateRow(r, index) {
   const missing = [];
   if (!Number.isFinite(r.amount) || r.amount <= 0) missing.push('amount');
@@ -46,17 +63,43 @@ export default async function handler(req, res) {
     cleaned.forEach(validateRow);
 
     const transactions = await getTransactions();
+    const duplicateCounts = new Map();
     const results = [];
 
     for (let i = 0; i < cleaned.length; i++) {
       const r = cleaned[i];
       try {
+        const fingerprint = [
+          customer.customer_id, r.date, r.amount.toFixed(2), r.itemId || r.itemName,
+          r.bankAccountId, r.paymentMode, r.notes
+        ].join('|');
+        const ordinal = (duplicateCounts.get(fingerprint) || 0) + 1;
+        duplicateCounts.set(fingerprint, ordinal);
+        const autoReference = makeReference(customer.customer_id, r, ordinal);
+
+        // Idempotency: if this exact generated reference was already posted, reuse it
+        // instead of creating a duplicate Zoho Sales Receipt. This protects retries
+        // after browser refreshes, Vercel timeouts, or partial batch failures.
+        const localExisting = transactions.find(t => t.referenceNumber === autoReference);
+        let existing = localExisting ? {
+          sales_receipt_id: localExisting.salesReceiptId || localExisting.docId,
+          receipt_number: localExisting.docNumber || ''
+        } : null;
+        if (!existing?.sales_receipt_id) {
+          const zohoExisting = await zoho.findSalesReceiptByReference(autoReference);
+          if (zohoExisting) existing = {
+            sales_receipt_id: zohoExisting.sales_receipt_id,
+            receipt_number: zohoExisting.receipt_number || ''
+          };
+        }
+
         const notes = [
           'Historical payment backfilled through Landblaze Payment Portal.',
+          `Portal Reference: ${autoReference}.`,
           r.notes,
         ].filter(Boolean).join(' ');
 
-        const receipt = await zoho.createSalesReceipt({
+        const receipt = existing || await zoho.createSalesReceipt({
           customerId: customer.customer_id,
           amount: r.amount,
           paymentMode: r.paymentMode || 'banktransfer',
@@ -65,7 +108,7 @@ export default async function handler(req, res) {
           itemId: r.itemId || undefined,
           lineItemName: r.itemName || 'Historical payment',
           notes,
-          referenceNumber: r.referenceNumber || undefined,
+          referenceNumber: autoReference,
         });
 
         const verified = await zoho.verifySalesReceiptExists(receipt.sales_receipt_id);
@@ -92,7 +135,7 @@ export default async function handler(req, res) {
           payMode: r.paymentMode || 'banktransfer',
           bankAccountName: r.bankAccountName || '',
           bankAccountId: r.bankAccountId,
-          referenceNumber: r.referenceNumber || '',
+          referenceNumber: autoReference,
           notes: r.notes || '',
           docType: 'sales_receipt',
           docId: receipt.sales_receipt_id,
@@ -105,6 +148,7 @@ export default async function handler(req, res) {
           docsSent: ['Historical Sales Receipt'],
           emailSent: false,
           emailErrors: [],
+          idempotencyReused: Boolean(existing),
         };
 
         transactions.unshift(entry);
@@ -117,6 +161,8 @@ export default async function handler(req, res) {
           bankAccountName: r.bankAccountName,
           receiptId: receipt.sales_receipt_id,
           receiptNumber: receipt.receipt_number,
+          referenceNumber: autoReference,
+          reusedExisting: Boolean(existing),
         });
       } catch (e) {
         results.push({ ok: false, row: i, error: e.message });
