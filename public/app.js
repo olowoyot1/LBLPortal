@@ -424,13 +424,13 @@ function goStep4() {
   const finalReason = forced ? ' — forced by toggle' : (autoFinalInstallment || autoFinalTopup) ? ' — balance reaches zero' : '';
 
   const docsText = {
-    outright: '① Payment receipt (emailed)<br>② Invoice (sent &amp; emailed)<br>③ Contract of Sale (attached)<br>④ Deed of Conveyance (attached)',
+    outright: '① Sales Receipt (emailed &amp; posted to income)<br>② Contract of Sale (generated)<br>③ Deed of Conveyance (generated)',
     installment: willBeFinal
-      ? '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed, closed as fully paid)<br>③ Contract of Sale (attached)<br>④ Deed of Conveyance (attached)'
-      : '① Payment receipt (emailed)<br>② Sales Order (sent &amp; emailed)<br>③ Contract of Sale (attached)<br><span style="color:var(--muted)">No Deed of Conveyance yet — that only goes out once this property is fully paid for.</span>',
+      ? '① Sales Receipt (emailed &amp; posted to income)<br>② Sales Order (sent &amp; emailed, closed as fully paid)<br>③ Contract of Sale (attached)<br>④ Deed of Conveyance (attached)'
+      : '① Sales Receipt (emailed &amp; posted to income)<br>② Sales Order (sent &amp; emailed)<br>③ Contract of Sale (attached)<br><span style="color:var(--muted)">No Deed of Conveyance yet — that only goes out once this property is fully paid for.</span>',
     topup: willBeFinal
-      ? '① Payment receipt (emailed)<br>② Full bundle also sent: Sales Order (closed), Contract of Sale &amp; Deed of Conveyance'
-      : '① Payment receipt (emailed)',
+      ? '① Sales Receipt (emailed &amp; posted to income)<br>② Full bundle also sent: Sales Order (closed), Contract of Sale &amp; Deed of Conveyance'
+      : '① Sales Receipt (emailed &amp; posted to income)',
   };
 
   el('review-card').innerHTML = `
@@ -494,7 +494,7 @@ async function processPayment() {
       return;
     }
 
-    const docLabels = { invoice: 'Invoice', sales_order: 'Sales Order', receipt_only: 'Receipt Only' };
+    const docLabels = { invoice: 'Legacy Invoice', sales_order: 'Sales Order', sales_receipt: 'Sales Receipt', receipt_only: 'Legacy Receipt Only' };
     setStep(5);
     const emailRow = result.emailSent
       ? `<div class="s-row"><div class="s-icon ok">📧</div><div><div class="s-label">Emailed to customer</div><div class="s-sub">${escapeHtml(result.custEmail || '')}</div></div></div>`
@@ -509,10 +509,12 @@ async function processPayment() {
         <div style="font-size:11px;color:var(--muted);margin-top:4px">${new Date(result.timestamp).toLocaleString('en-NG')} · ${escapeHtml(result.realtor)}</div>
       </div>
       <div class="s-row"><div class="s-icon ok">👤</div><div><div class="s-label">${escapeHtml(result.custName)}</div><div class="s-sub">${result.custCreated ? 'New customer created · ' : ''}ID: ${escapeHtml(result.custId)}</div></div></div>
-      <div class="s-row"><div class="s-icon ok">🧾</div><div><div class="s-label">Payment receipt recorded &amp; verified</div><div class="s-sub">${fmt(result.amtPaid)} · ${modeLabel(result.payMode)}${result.bankAccountName ? ' · ' + escapeHtml(result.bankAccountName) : ''}</div><span class="doc-chip">${escapeHtml(result.paymentId)}</span></div></div>
-      ${result.docType !== 'receipt_only'
-        ? `<div class="s-row"><div class="s-icon ok">📄</div><div><div class="s-label">${docLabels[result.docType]} sent to customer &amp; verified</div>${result.docType === 'sales_order' ? `<div class="s-sub">Full contract: ${fmt(result.fullPrice)}</div>` : ''}<span class="doc-chip">${escapeHtml(result.docNumber || result.docId)}</span></div></div>`
-        : `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Top-up applied to ${escapeHtml(result.soNumber || '')}</div><div class="s-sub">Remaining balance: ${fmt(result.soRemainingBalance ?? 0)}</div></div></div>`}
+      <div class="s-row"><div class="s-icon ok">🧾</div><div><div class="s-label">Sales receipt recorded &amp; verified — income updated</div><div class="s-sub">${fmt(result.amtPaid)} · ${modeLabel(result.payMode)}${result.bankAccountName ? ' · ' + escapeHtml(result.bankAccountName) : ''}</div><span class="doc-chip">${escapeHtml(result.salesReceiptId || result.paymentId || result.docId || '')}</span></div></div>
+      ${result.docType === 'sales_receipt'
+        ? `<div class="s-row"><div class="s-icon ok">🧾</div><div><div class="s-label">Sales Receipt sent to customer &amp; verified</div><div class="s-sub">This payment is posted as income in Zoho Books</div><span class="doc-chip">${escapeHtml(result.docNumber || result.salesReceiptId || '')}</span></div></div>`
+        : result.docType !== 'receipt_only'
+          ? `<div class="s-row"><div class="s-icon ok">📄</div><div><div class="s-label">${docLabels[result.docType]} sent to customer &amp; verified</div>${result.docType === 'sales_order' ? `<div class="s-sub">Full contract: ${fmt(result.fullPrice)}</div>` : ''}<span class="doc-chip">${escapeHtml(result.docNumber || result.docId)}</span></div></div>`
+          : `<div class="s-row"><div class="s-icon ok">📋</div><div><div class="s-label">Top-up applied to ${escapeHtml(result.soNumber || '')}</div><div class="s-sub">Remaining balance: ${fmt(result.soRemainingBalance ?? 0)}</div></div></div>`}
       ${finalBundleRow}
       ${emailRow}
       <button class="log-btn gold" onclick="resendContractFromModal('${result.id}', this)" style="width:100%;justify-content:center;display:flex;align-items:center;gap:6px;margin-top:10px">📨 Send/Resend Documents Now</button>
@@ -600,9 +602,9 @@ function openTxDetail(transactionId) {
   if (!tx) return;
 
   const txLabels = { topup: 'Top-up', outright: 'Outright Purchase', installment: 'New Installment' };
-  const docLabels = { invoice: 'Invoice', sales_order: 'Sales Order', receipt_only: 'Receipt Only', legacy: 'Legacy (portal only)' };
-  const isDocTx = tx.docType === 'invoice' || tx.docType === 'sales_order';
-  const resendLabel = isDocTx ? 'Resend Documents (Contract + Deed)' : 'Resend Payment Receipt';
+  const docLabels = { invoice: 'Legacy Invoice', sales_order: 'Sales Order', sales_receipt: 'Sales Receipt', receipt_only: 'Legacy Receipt Only', legacy: 'Legacy (portal only)' };
+  const isDocTx = tx.docType === 'invoice' || tx.docType === 'sales_order' || tx.docType === 'sales_receipt';
+  const resendLabel = isDocTx ? (tx.docType === 'sales_receipt' ? 'Resend Sales Receipt' : 'Resend Documents (Contract + Deed)') : 'Resend Payment Receipt';
 
   const row = (label, value) => value
     ? `<div class="detail-row"><div class="detail-label">${escapeHtml(label)}</div><div class="detail-value">${value}</div></div>`

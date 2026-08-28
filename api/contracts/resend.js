@@ -47,9 +47,90 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'This is a manually recorded legacy payment — no email was ever sent for it, so there\u2019s nothing to resend.' });
     }
 
-    // ── Top-ups: resend the payment receipt (with its payment-history
-    // table rebuilt from the current log) — there's no invoice/sales
-    // order attached directly to a top-up itself. ──
+    // ── Sales receipts: resend the accounting receipt. For a final
+    // installment, the original sales order remains the home for the
+    // Contract/Deed bundle, so resend that bundle as well. ──
+    if (tx.docType === 'sales_receipt') {
+      let paymentHistoryHtml = null;
+      if (tx.soNumber) {
+        const related = transactions.filter((t) => t.soNumber === tx.soNumber || t.docNumber === tx.soNumber);
+        const priorPayments = related.filter((t) => t.id !== tx.id && new Date(t.timestamp) <= new Date(tx.timestamp));
+        const contractTotal = related.find((t) => t.docType === 'sales_order')?.fullPrice || tx.fullPrice;
+        const { html } = buildPaymentHistoryTable({
+          priorPayments,
+          newPayment: { date: tx.timestamp, amount: tx.amtPaid, mode: tx.payMode },
+          contractTotal,
+          soNumber: tx.soNumber,
+        });
+        paymentHistoryHtml = html;
+      }
+
+      await zoho.sendSalesReceiptEmail(tx.docId, {
+        email: tx.custEmail,
+        ccEmail,
+        receiptNumber: tx.docNumber || tx.docId,
+        extraBodyHtml: paymentHistoryHtml,
+      });
+
+      const docsSent = ['Sales Receipt'];
+      if (tx.finalPayment && tx.soNumber) {
+        const originalTx = transactions.find((t) => t.docType === 'sales_order' && t.docNumber === tx.soNumber);
+        if (originalTx?.docId) {
+          let customerAddress = '';
+          try {
+            const full = await zoho.getContact(tx.custId);
+            customerAddress = full.address || '';
+          } catch (e) {}
+
+          let contractCode = originalTx.contractCode || tx.contractCode || await generateContractCode(tx.timestamp);
+          const contractPdf = await buildContractPdf({
+            customerName: tx.custName,
+            customerAddress,
+            propertyDescription: originalTx.propDesc || tx.propDesc,
+            plotSize: originalTx.plotSize || tx.plotSize,
+            fullPrice: tx.fullPrice,
+            amountPaid: tx.amtPaid,
+            contractDate: tx.timestamp,
+            documentNumber: originalTx.docNumber,
+            contractCode,
+            deedAttached: true,
+          });
+          await attachContract({ docKind: 'salesorder', docId: originalTx.docId, contractPdf });
+
+          const deedPdf = await buildDeedOfAssignmentPdf({
+            customerName: tx.custName,
+            customerAddress,
+            propertyDescription: originalTx.propDesc || tx.propDesc,
+            plotSize: originalTx.plotSize || tx.plotSize,
+            considerationAmount: tx.fullPrice,
+            documentNumber: originalTx.docNumber,
+            contractCode,
+            deedDate: tx.timestamp,
+          });
+          await attachDeed({ docKind: 'salesorder', docId: originalTx.docId, deedPdf });
+
+          await zoho.sendSalesOrderEmail(originalTx.docId, {
+            email: tx.custEmail,
+            ccEmail,
+            salesorderNumber: originalTx.docNumber,
+            sendAttachment: true,
+            contractCode,
+          });
+          docsSent.push('Sales Order', 'Contract of Sale', 'Deed of Conveyance');
+        }
+      }
+
+      return res.json({
+        success: true,
+        custEmail: tx.custEmail,
+        docNumber: tx.docNumber,
+        contractCode: tx.contractCode || null,
+        docsSent,
+      });
+    }
+
+    // ── Top-ups from older versions: resend the legacy customer-payment
+    // receipt where paymentId exists. ──
     if (tx.docType === 'receipt_only' || !tx.docId) {
       if (!tx.paymentId) {
         return res.status(400).json({ error: 'This transaction has no payment on record to resend a receipt for.' });

@@ -468,6 +468,92 @@ export async function markInvoiceSent(invoiceId) {
   await zohoRequest('post', `/invoices/${invoiceId}/status/sent`);
 }
 
+// ── Sales receipts ──
+// Sales receipts are the accounting document for immediate-payment sales.
+// Unlike a standalone customer payment, a sales receipt records the sale
+// and the payment together, so the income statement is updated from the
+// receipt itself.
+const SALES_RECEIPT_PAYMENT_MODES = {
+  banktransfer: 'bank_transfer',
+  creditcard: 'credit_card',
+  cheque: 'check',
+  cash: 'cash',
+  others: 'others',
+};
+
+export async function createSalesReceipt({
+  customerId,
+  amount,
+  paymentMode,
+  accountId,
+  date,
+  itemId,
+  lineItemName,
+  notes,
+  referenceNumber,
+}) {
+  const lineItem = itemId
+    ? { item_id: itemId, rate: Number(amount), quantity: 1 }
+    : { name: lineItemName, rate: Number(amount), quantity: 1 };
+
+  const payload = {
+    customer_id: customerId,
+    date,
+    payment_mode: SALES_RECEIPT_PAYMENT_MODES[paymentMode] || paymentMode || 'bank_transfer',
+    line_items: [lineItem],
+    notes,
+    ...(accountId ? { account_id: accountId } : {}),
+    ...(referenceNumber ? { reference_number: referenceNumber } : {}),
+  };
+
+  const data = await zohoRequest('post', '/salesreceipts', { data: payload });
+  if (!data.salesreceipt?.sales_receipt_id) {
+    throw new Error(`Sales receipt creation did not return a sales_receipt_id: ${JSON.stringify(data)}`);
+  }
+
+  return {
+    sales_receipt_id: data.salesreceipt.sales_receipt_id,
+    receipt_number: data.salesreceipt.receipt_number,
+  };
+}
+
+export async function verifySalesReceiptExists(salesReceiptId) {
+  const data = await zohoRequest('get', `/salesreceipts/${salesReceiptId}`);
+  return Boolean(data.salesreceipt?.sales_receipt_id);
+}
+
+export async function sendSalesReceiptEmail(
+  salesReceiptId,
+  { email, ccEmail, receiptNumber, extraBodyHtml } = {}
+) {
+  const template = await zohoRequest('get', `/salesreceipts/${salesReceiptId}/email`);
+  const { subject: templateSubject, body } = extractEmailTemplate(
+    template,
+    `Sales Receipt ${receiptNumber || salesReceiptId}`
+  );
+
+  const payload = {
+    to_mail_ids: email ? [email] : [],
+    subject: templateSubject,
+    body: extraBodyHtml ? `${body}${extraBodyHtml}` : body,
+    attach_pdf: true,
+  };
+
+  const ccList = toCcArray(ccEmail);
+  if (ccList.length) {
+    try {
+      await zohoRequest('post', `/salesreceipts/${salesReceiptId}/email`, {
+        data: { ...payload, cc_mail_ids: ccList },
+      });
+      return;
+    } catch (e) {
+      // Retry without CC; the customer receipt must still be delivered.
+    }
+  }
+
+  await zohoRequest('post', `/salesreceipts/${salesReceiptId}/email`, { data: payload });
+}
+
 // ── Customer payments ──
 
 export async function createCustomerPayment({ customerId, amount, paymentMode, accountId, date, referenceNumber, description }) {

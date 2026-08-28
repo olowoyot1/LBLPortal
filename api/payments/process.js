@@ -87,29 +87,17 @@ export default async function handler(req, res) {
       }
     }
 
-    // Step 2: create payment receipt — skipped entirely for a legacy
-    // entry, since it must never create anything in Zoho.
+    // Step 2: create the accounting receipt/document.
+    // IMPORTANT: do NOT create a standalone customer payment here. A sales
+    // receipt records both the cash/bank receipt and the sale, so it posts
+    // revenue to the income statement without creating a duplicate payment.
     const itemLabel = (item?.name || propDesc || salesOrder?.subject || 'property');
-    const description = `Payment for ${itemLabel}${notes ? ' — ' + notes : ''}`;
     let payment = null;
-    if (!isLegacyEntry) {
-      payment = await zoho.createCustomerPayment({
-        customerId,
-        amount: Number(amtPaid),
-        paymentMode: payMode || 'banktransfer',
-        accountId: bankAccount?.account_id,
-        date: payDate,
-        description,
-      });
-
-      const paymentVerified = await zoho.verifyPaymentExists(payment.payment_id);
-      if (!paymentVerified) {
-        throw new Error('Payment was created but could not be verified in Zoho Books. Please check Zoho directly before retrying.');
-      }
-    }
+    let salesReceipt = null;
+    const description = `Payment for ${itemLabel}${notes ? ' — ' + notes : ''}`;
 
     // Step 3: create matching document
-    let docType = isLegacyEntry ? 'legacy' : 'receipt_only';
+    let docType = isLegacyEntry ? 'legacy' : 'sales_receipt';
     let docId = null;
     let docNumber = null;
     let emailSent = false;
@@ -125,82 +113,110 @@ export default async function handler(req, res) {
     // applies to a legacy entry — it never triggers document sending
     // regardless of the resulting balance.
     let isFinalPayment = false;
-    let docsSent = isLegacyEntry ? ['Legacy Payment Recorded (portal only)'] : ['Payment Receipt'];
+    let docsSent = isLegacyEntry ? ['Legacy Payment Recorded (portal only)'] : ['Sales Receipt'];
 
     if (txType === 'outright') {
-      isFinalPayment = true;
-      const notesText = `Full payment received. ${payMode}${notes ? ' — ' + notes : ''}`;
-      const invoice = await zoho.createInvoice({
-        customerId, date: payDate, itemId: item?.item_id, lineItemName: itemLabel, rate: Number(fullPrice), notes: notesText, salesperson,
-      });
-      const verified = await zoho.verifyInvoiceExists(invoice.invoice_id);
-      if (!verified) throw new Error('Invoice was created but could not be verified. Check Zoho Books directly.');
-      docType = 'invoice'; docId = invoice.invoice_id; docNumber = invoice.invoice_number;
+      if (Number(amtPaid) !== Number(fullPrice)) {
+        return res.status(400).json({
+          error: 'An outright purchase must be fully paid. Amount Paid must equal the Full Property Price.',
+        });
+      }
 
-      // Generate the customized Contract of Sale and attach it — every
-      // sale gets this. An outright purchase is always fully paid at
-      // inception, so the Deed of Conveyance (ownership transfer) also
-      // goes out immediately, per Landblaze's own contract terms ("...
-      // Deed of Assignment ... upon full settlement of the purchase
-      // price"). Non-blocking: a document failure shouldn't stop the sale
-      // itself.
+      isFinalPayment = true;
+      const notesText = `Outright purchase — full payment received. ${payMode}${notes ? ' — ' + notes : ''}`;
+
+      salesReceipt = await zoho.createSalesReceipt({
+        customerId,
+        amount: Number(amtPaid),
+        paymentMode: payMode || 'banktransfer',
+        accountId: bankAccount?.account_id,
+        date: payDate,
+        itemId: item?.item_id,
+        lineItemName: itemLabel,
+        notes: notesText,
+      });
+      const verified = await zoho.verifySalesReceiptExists(salesReceipt.sales_receipt_id);
+      if (!verified) {
+        throw new Error('Sales receipt was created but could not be verified in Zoho Books. Please check Zoho directly.');
+      }
+
+      docType = 'sales_receipt';
+      docId = salesReceipt.sales_receipt_id;
+      docNumber = salesReceipt.receipt_number;
+      docsSent.push('Sales Receipt');
+
+      // Outright purchases no longer create invoices. The sales receipt is
+      // the customer-facing accounting document and records the income and
+      // payment together. The contract/deed generation is retained in the
+      // portal log for future document workflows.
       try {
         contractCode = await generateContractCode(payDate);
         const contractPdf = await buildContractPdf({
           customerName, customerAddress, propertyDescription: itemLabel, plotSize,
           fullPrice: Number(fullPrice), amountPaid: Number(amtPaid),
-          contractDate: payDate, documentNumber: invoice.invoice_number, contractCode,
+          contractDate: payDate, documentNumber: salesReceipt.receipt_number, contractCode,
           deedAttached: true,
         });
-        await attachContract({ docKind: 'invoice', docId: invoice.invoice_id, contractPdf });
-        docsSent.push('Invoice', 'Contract of Sale');
+        // There is no documented Sales Receipt attachment endpoint in the
+        // current Zoho Books v3 API, so do not pretend the PDF was attached.
+        // The receipt itself is emailed as the official accounting document.
+        void contractPdf;
 
         const deedPdf = await buildDeedOfAssignmentPdf({
           customerName, customerAddress, propertyDescription: itemLabel, plotSize,
           considerationAmount: Number(fullPrice),
-          documentNumber: invoice.invoice_number, contractCode, deedDate: payDate,
+          documentNumber: salesReceipt.receipt_number, contractCode, deedDate: payDate,
         });
-        await attachDeed({ docKind: 'invoice', docId: invoice.invoice_id, deedPdf });
-        docsSent.push('Deed of Conveyance');
+        void deedPdf;
+        docsSent.push('Contract of Sale (generated)', 'Deed of Conveyance (generated)');
       } catch (e) {
         emailErrors.push(`Contract generation: ${e.message}`);
       }
 
-      // Send the invoice to the customer (emails their copy, CC'd to the
-      // realtor(s) — the logged-in staff member plus any manually-entered
-      // realtor emails) and explicitly mark it as sent — this is what
-      // moves it out of draft status in Zoho Books. Done independently so
-      // a failed email doesn't leave the invoice stuck in Draft.
       try {
-        await zoho.sendInvoiceEmail(invoice.invoice_id, { email: customerEmail, ccEmail: ccList, invoiceNumber: invoice.invoice_number, sendAttachment: true, contractCode });
+        await zoho.sendSalesReceiptEmail(salesReceipt.sales_receipt_id, {
+          email: customerEmail,
+          ccEmail: ccList,
+          receiptNumber: salesReceipt.receipt_number,
+        });
         emailSent = true;
       } catch (e) {
-        emailErrors.push(`Invoice email: ${e.message}`);
-      }
-      try {
-        await zoho.markInvoiceSent(invoice.invoice_id);
-      } catch (e) {
-        emailErrors.push(`Invoice status update: ${e.message}`);
+        emailErrors.push(`Sales receipt email: ${e.message}`);
       }
 
     } else if (txType === 'installment') {
-      const notesText = `Installment plan. Initial deposit NGN ${Number(amtPaid).toLocaleString()} on ${payDate} via ${payMode}${notes ? ' — ' + notes : ''}`;
+      const notesText = `Installment plan. Initial payment NGN ${Number(amtPaid).toLocaleString()} on ${payDate} via ${payMode}${notes ? ' — ' + notes : ''}`;
+
+      // The sales order represents the full contract value.
       const so = await zoho.createSalesOrder({
-        customerId, date: payDate, itemId: item?.item_id, lineItemName: itemLabel, rate: Number(fullPrice), notes: notesText, salesperson,
+        customerId, date: payDate, itemId: item?.item_id, lineItemName: itemLabel,
+        rate: Number(fullPrice), notes: notesText, salesperson,
       });
       const verified = await zoho.verifySalesOrderExists(so.salesorder_id);
       if (!verified) throw new Error('Sales order was created but could not be verified. Check Zoho Books directly.');
-      docType = 'sales_order'; docId = so.salesorder_id; docNumber = so.salesorder_number;
+      docType = 'sales_order';
+      docId = so.salesorder_id;
+      docNumber = so.salesorder_number;
 
-      // The Contract of Sale goes out with every installment sale right
-      // from the start — same as outright. The Deed of Conveyance is the
-      // one exception: it only rides along once this property is
-      // actually fully paid for — either the very first deposit already
-      // covers the full price, or the "final payment" toggle was ticked.
-      // Otherwise it waits for the balance to actually reach zero (see
-      // the top-up branch below).
+      // The missing accounting leg: every installment payment creates a
+      // SALES RECEIPT for the amount actually received. The sales order
+      // remains non-posting; the receipt is what records income/cash.
+      salesReceipt = await zoho.createSalesReceipt({
+        customerId,
+        amount: Number(amtPaid),
+        paymentMode: payMode || 'banktransfer',
+        accountId: bankAccount?.account_id,
+        date: payDate,
+        itemId: item?.item_id,
+        lineItemName: itemLabel,
+        notes: `Installment payment against ${so.salesorder_number}. ${description}`,
+        referenceNumber: so.salesorder_number,
+      });
+      const receiptVerified = await zoho.verifySalesReceiptExists(salesReceipt.sales_receipt_id);
+      if (!receiptVerified) throw new Error('Sales receipt was created but could not be verified in Zoho Books.');
+      docsSent.push('Sales Receipt', 'Sales Order');
+
       isFinalPayment = Boolean(finalPayment) || Number(amtPaid) >= Number(fullPrice);
-      docsSent.push('Sales Order');
       try {
         contractCode = await generateContractCode(payDate);
         const contractPdf = await buildContractPdf({
@@ -225,19 +241,31 @@ export default async function handler(req, res) {
         emailErrors.push(`Contract generation: ${e.message}`);
       }
 
-      // Send the sales order to the customer (emails their copy, CC'd to
-      // the realtor(s) — the logged-in staff member plus any
-      // manually-entered realtor emails) and explicitly mark it as Open —
-      // sales orders use Draft/Open/Closed/Void in Zoho Books (not
-      // "sent"). sendAttachment is always true here since the Contract of
-      // Sale is always attached above. Done independently so a failed
-      // email doesn't leave the order stuck in Draft.
       try {
-        await zoho.sendSalesOrderEmail(so.salesorder_id, { email: customerEmail, ccEmail: ccList, salesorderNumber: so.salesorder_number, sendAttachment: true, contractCode });
+        await zoho.sendSalesOrderEmail(so.salesorder_id, {
+          email: customerEmail,
+          ccEmail: ccList,
+          salesorderNumber: so.salesorder_number,
+          sendAttachment: true,
+          contractCode,
+        });
         emailSent = true;
       } catch (e) {
         emailErrors.push(`Sales order email: ${e.message}`);
       }
+
+      // Also email the accounting sales receipt separately.
+      try {
+        await zoho.sendSalesReceiptEmail(salesReceipt.sales_receipt_id, {
+          email: customerEmail,
+          ccEmail: ccList,
+          receiptNumber: salesReceipt.receipt_number,
+        });
+        emailSent = true;
+      } catch (e) {
+        emailErrors.push(`Sales receipt email: ${e.message}`);
+      }
+
       if (isFinalPayment) {
         try {
           await zoho.markSalesOrderClosed(so.salesorder_id);
@@ -257,6 +285,25 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'Sales order is required for a top-up payment' });
       }
       docNumber = salesOrder.salesorder_number;
+
+      // Every installment top-up is a separate sales receipt for the amount
+      // actually received. This is the posting that updates income/cash.
+      salesReceipt = await zoho.createSalesReceipt({
+        customerId,
+        amount: Number(amtPaid),
+        paymentMode: payMode || 'banktransfer',
+        accountId: bankAccount?.account_id,
+        date: payDate,
+        itemId: item?.item_id,
+        lineItemName: itemLabel,
+        notes: `Installment payment against ${salesOrder.salesorder_number}. ${description}`,
+        referenceNumber: salesOrder.salesorder_number,
+      });
+      const receiptVerified = await zoho.verifySalesReceiptExists(salesReceipt.sales_receipt_id);
+      if (!receiptVerified) throw new Error('Sales receipt was created but could not be verified in Zoho Books.');
+      docType = 'sales_receipt';
+      docId = salesReceipt.sales_receipt_id;
+      docNumber = salesReceipt.receipt_number;
     }
     // Fetch the transaction log now (needed below both to compute the
     // top-up running balance for the receipt email, and to append this
@@ -350,17 +397,17 @@ export default async function handler(req, res) {
     // except a legacy entry, which must never send any email at all.
     // Top-ups additionally get the full payment-history table embedded
     // in the email body.
-    if (!isLegacyEntry) {
+    if (!isLegacyEntry && salesReceipt) {
       try {
-        await zoho.sendPaymentReceiptEmail(payment.payment_id, {
+        await zoho.sendSalesReceiptEmail(salesReceipt.sales_receipt_id, {
           email: customerEmail,
           ccEmail: ccList,
-          paymentNumber: payment.payment_number,
+          receiptNumber: salesReceipt.receipt_number,
           extraBodyHtml: paymentHistoryHtml,
         });
         emailSent = true;
       } catch (e) {
-        emailErrors.push(`Receipt email: ${e.message}`);
+        emailErrors.push(`Sales receipt email: ${e.message}`);
       }
     }
 
@@ -393,6 +440,7 @@ export default async function handler(req, res) {
       docNumber,
       contractCode,
       paymentId: payment ? payment.payment_id : null,
+      salesReceiptId: salesReceipt ? salesReceipt.sales_receipt_id : null,
       soNumber: txType === 'topup' ? salesOrder.salesorder_number : null,
       finalPayment: isFinalPayment,
       docsSent,
