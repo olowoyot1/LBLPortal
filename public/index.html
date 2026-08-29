@@ -403,7 +403,7 @@ a{color:var(--gold);text-decoration:none}
   <nav class="nav">
     <div class="nav-left">
       <div class="nav-logo">LB</div>
-      <span class="nav-title">Payment Portal <span style="font-size:9px;color:var(--muted);margin-left:5px">v2.1.0</span></span>
+      <span class="nav-title">Payment Portal <span style="font-size:9px;color:var(--muted);margin-left:5px">v2.3.0</span></span>
     </div>
     <div class="nav-tabs">
       <button class="nav-tab active" id="tab-payment" onclick="switchTab('payment')">New Payment</button>
@@ -465,7 +465,10 @@ a{color:var(--gold);text-decoration:none}
         <div style="font-size:11px;color:var(--muted);margin-top:4px">All fields are required — email and phone are needed to send the customer their receipt, invoice, or sales order.</div>
       </div>
       <div class="action-bar">
-        <button class="btn-outline" id="history-btn" onclick="openHistoryForSelectedCustomer()" disabled style="margin-top:0;flex:1">↻ Update Payment History</button>
+        <div style="display:flex;gap:8px;margin-top:0">
+          <button class="btn-outline" id="history-btn" onclick="openHistoryForSelectedCustomer()" disabled style="flex:1">↻ Update Payment History</button>
+          <button class="btn-outline" id="statement-btn" onclick="generateCustomerStatement()" disabled style="flex:1">▤ Generate Customer Statement</button>
+        </div>
         <button class="btn-next" id="next1" onclick="goStep2()" disabled>Continue →</button>
       </div>
     </div>

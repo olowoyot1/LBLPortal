@@ -17,6 +17,10 @@
       "destination": "/api/zoho-data/sales-orders"
     },
     {
+      "source": "/api/statements",
+      "destination": "/api/statements"
+    },
+    {
       "source": "/api/setup",
       "destination": "/api/staff/setup"
     },

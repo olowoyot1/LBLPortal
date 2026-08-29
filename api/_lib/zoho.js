@@ -315,6 +315,90 @@ function extractEmailTemplate(resp, fallbackSubject) {
   return { subject, body };
 }
 
+export async function listCustomerSalesOrders(customerId) {
+  const all = [];
+  let page = 1;
+  for (; page <= 20; page++) {
+    const data = await zohoRequest('get', '/salesorders', {
+      params: { customer_id: customerId, per_page: 200, page },
+    });
+    const orders = data.salesorders || [];
+    all.push(...orders);
+    if (!data.page_context?.has_more_page || orders.length === 0) break;
+  }
+
+  // The list endpoint normally contains line_items, but fetch the detail when
+  // it does not so the statement can identify the property/item behind each
+  // sales order reliably.
+  const normalized = [];
+  for (const o of all) {
+    let detail = o;
+    if (!Array.isArray(o.line_items)) {
+      try {
+        const full = await zohoRequest('get', `/salesorders/${o.salesorder_id}`);
+        detail = full.salesorder || o;
+      } catch {
+        detail = o;
+      }
+    }
+    normalized.push({
+      salesorder_id: detail.salesorder_id,
+      salesorder_number: detail.salesorder_number,
+      total: Number(detail.total || 0),
+      status: detail.status || '',
+      date: detail.date || '',
+      subject: detail.reference_number || detail.salesorder_number || '',
+      line_items: (detail.line_items || []).map((li) => ({
+        item_id: li.item_id || '',
+        name: li.name || '',
+        quantity: Number(li.quantity || 0),
+        rate: Number(li.rate || 0),
+      })),
+    });
+  }
+  return normalized;
+}
+
+export async function listCustomerSalesReceipts(customerId) {
+  const all = [];
+  for (let page = 1; page <= 20; page++) {
+    const data = await zohoRequest('get', '/salesreceipts', {
+      params: { customer_id: customerId, per_page: 200, page },
+    });
+    const receipts = data.salesreceipts || [];
+    all.push(...receipts);
+    if (!data.page_context?.has_more_page || receipts.length === 0) break;
+  }
+  const normalized = [];
+  for (const r of all) {
+    let detail = r;
+    if (!Array.isArray(r.line_items)) {
+      try {
+        const full = await zohoRequest('get', `/salesreceipts/${r.sales_receipt_id}`);
+        detail = full.salesreceipt || r;
+      } catch {
+        detail = r;
+      }
+    }
+    normalized.push({
+      sales_receipt_id: detail.sales_receipt_id,
+      receipt_number: detail.receipt_number,
+      date: detail.date,
+      total: Number(detail.total || 0),
+      reference_number: detail.reference_number || '',
+      payment_mode_name: detail.payment_mode_name || '',
+      deposit_to_account_name: detail.deposit_to_account_name || '',
+      line_items: (detail.line_items || []).map((li) => ({
+        item_id: li.item_id || '',
+        name: li.name || '',
+        quantity: Number(li.quantity || 0),
+        item_total: Number(li.item_total || 0),
+      })),
+    });
+  }
+  return normalized;
+}
+
 export async function listOpenSalesOrders(customerId) {
   const data = await zohoRequest('get', '/salesorders', {
     params: { customer_id: customerId, status: 'open' },

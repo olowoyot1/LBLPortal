@@ -113,9 +113,9 @@ function setCustType(t) {
   el('btn-existing').classList.toggle('active', t === 'existing');
   el('btn-new').classList.toggle('active', t === 'new');
   if (t === 'existing') {
-    show('existing-search'); hide('new-cust-form'); el('next1').disabled = !S.customer; if (el('history-btn')) el('history-btn').disabled = !S.customer;
+    show('existing-search'); hide('new-cust-form'); el('next1').disabled = !S.customer; if (el('history-btn')) el('history-btn').disabled = !S.customer; if (el('statement-btn')) el('statement-btn').disabled = !S.customer;
   } else {
-    hide('existing-search'); show('new-cust-form'); el('next1').disabled = false; if (el('history-btn')) el('history-btn').disabled = false; S.customer = null;
+    hide('existing-search'); show('new-cust-form'); el('next1').disabled = false; if (el('history-btn')) el('history-btn').disabled = false; if (el('statement-btn')) el('statement-btn').disabled = true; S.customer = null;
   }
 }
 
@@ -160,6 +160,7 @@ function selectCustomer(c) {
   const t = el('cr-' + c.customer_id); if (t) t.classList.add('selected');
   el('next1').disabled = false;
   if (el('history-btn')) el('history-btn').disabled = false;
+  if (el('statement-btn')) el('statement-btn').disabled = false;
 }
 
 // ── HISTORICAL PAYMENT BACKFILL ──
@@ -205,6 +206,37 @@ async function openHistoryForSelectedCustomer() {
     alert(e.message);
   } finally {
     if (btn) { btn.disabled = !S.customer; btn.innerHTML = '↻ Update Payment History'; }
+  }
+}
+
+async function generateCustomerStatement() {
+  if (!S.customer?.customer_id) {
+    alert('Please select or create a customer first.');
+    return;
+  }
+  const btn = el('statement-btn');
+  const original = btn?.innerHTML || '▤ Customer Statement';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generating...'; }
+  try {
+    const res = await fetch(`${API}/api/statements?customerId=${encodeURIComponent(S.customer.customer_id)}`, { credentials: 'include' });
+    if (!res.ok) {
+      let msg = `Could not generate statement (${res.status})`;
+      try { const body = await res.json(); msg = body?.error || msg; } catch {}
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Landblaze-Statement-${(S.customer.customer_name || 'Customer').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (e) {
+    alert(`Could not generate customer statement: ${e.message}`);
+  } finally {
+    if (btn) { btn.disabled = !S.customer; btn.innerHTML = original; }
   }
 }
 
@@ -360,7 +392,7 @@ function goStep2() {
     if (!/^\S+@\S+\.\S+$/.test(email)) { alert('Please enter a valid email address.'); return; }
     S.newCust = { name, email, phone, address };
     S.customer = { customer_name: name, email, phone, isNew: true };
-    if (el('history-btn')) el('history-btn').disabled = false;
+    if (el('history-btn')) el('history-btn').disabled = false; if (el('statement-btn')) el('statement-btn').disabled = true;
   }
   if (!S.customer) { alert('Please select or create a customer'); return; }
   S.txType = null; S.salesOrder = null;
