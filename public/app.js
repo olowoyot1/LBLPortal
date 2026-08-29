@@ -210,35 +210,65 @@ async function openHistoryForSelectedCustomer() {
   }
 }
 
-async function generateCustomerStatement() {
+let currentStatementUrl = null;
+let currentStatementFilename = null;
+
+async function viewCustomerStatement() {
   if (!S.customer?.customer_id) {
     alert('Please select or create a customer first.');
     return;
   }
   const btn = el('statement-btn');
-  const original = btn?.innerHTML || '▤ Customer Statement';
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Generating...'; }
+  const original = btn?.innerHTML || '▤ View Customer Statement';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Loading...'; }
+
+  el('statement-modal-sub').textContent = S.customer.customer_name || '';
+  el('statement-frame').classList.add('hidden');
+  el('statement-frame').src = 'about:blank';
+  el('statement-loading').classList.remove('hidden');
+  el('statement-download-btn').disabled = true;
+  el('statement-modal').classList.remove('hidden');
+
   try {
     const res = await fetch(`${API}/api/statements?customerId=${encodeURIComponent(S.customer.customer_id)}`, { credentials: 'include' });
     if (!res.ok) {
-      let msg = `Could not generate statement (${res.status})`;
+      let msg = `Could not load statement (${res.status})`;
       try { const body = await res.json(); msg = body?.error || msg; } catch {}
       throw new Error(msg);
     }
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Landblaze-Statement-${(S.customer.customer_name || 'Customer').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    if (currentStatementUrl) URL.revokeObjectURL(currentStatementUrl);
+    currentStatementUrl = URL.createObjectURL(blob);
+    currentStatementFilename = `Landblaze-Statement-${(S.customer.customer_name || 'Customer').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '')}.pdf`;
+
+    const frame = el('statement-frame');
+    frame.src = currentStatementUrl;
+    frame.classList.remove('hidden');
+    el('statement-loading').classList.add('hidden');
+    el('statement-download-btn').disabled = false;
   } catch (e) {
-    alert(`Could not generate customer statement: ${e.message}`);
+    el('statement-loading').innerHTML = `<span style="color:var(--red)">${escapeHtml(e.message)}</span>`;
   } finally {
     if (btn) { btn.disabled = !S.customer; btn.innerHTML = original; }
   }
+}
+
+function downloadCurrentStatement() {
+  if (!currentStatementUrl) return;
+  const a = document.createElement('a');
+  a.href = currentStatementUrl;
+  a.download = currentStatementFilename || 'Customer-Statement.pdf';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function closeStatementModal() {
+  el('statement-modal').classList.add('hidden');
+  el('statement-frame').src = 'about:blank';
+  if (currentStatementUrl) { URL.revokeObjectURL(currentStatementUrl); currentStatementUrl = null; }
+  currentStatementFilename = null;
+  el('statement-loading').innerHTML = '<span class="spinner"></span> Loading statement...';
 }
 
 async function loadHistoryLookups() {

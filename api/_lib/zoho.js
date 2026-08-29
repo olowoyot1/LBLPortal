@@ -365,7 +365,7 @@ export async function listCustomerSalesReceipts(customerId) {
     const data = await zohoRequest('get', '/salesreceipts', {
       params: { customer_id: customerId, per_page: 200, page },
     });
-    const receipts = data.salesreceipts || [];
+    const receipts = extractSalesReceiptList(data);
     all.push(...receipts);
     if (!data.page_context?.has_more_page || receipts.length === 0) break;
   }
@@ -375,7 +375,7 @@ export async function listCustomerSalesReceipts(customerId) {
     if (!Array.isArray(r.line_items)) {
       try {
         const full = await zohoRequest('get', `/salesreceipts/${r.sales_receipt_id}`);
-        detail = full.salesreceipt || r;
+        detail = extractSalesReceiptRecord(full) || r;
       } catch {
         detail = r;
       }
@@ -592,11 +592,10 @@ export async function createSalesReceipt({
 
   const data = await zohoRequest('post', '/salesreceipts', { data: payload });
 
-  // Zoho's create response can return the receipt inside
-  // `sales_receipt_details` (the current API response shape) rather than
-  // the older `salesreceipt` envelope. Accept both shapes so a successfully
-  // created receipt is never reported as a failure.
-  const details = data?.sales_receipt_details || data?.salesreceipt || data?.sales_receipt || null;
+  // Zoho's response envelope for this (undocumented) endpoint is
+  // inconsistent — see extractSalesReceiptRecord() below, which every
+  // sales-receipt reader in this file relies on for the same reason.
+  const details = extractSalesReceiptRecord(data);
   const salesReceiptId = details?.sales_receipt_id;
   if (!salesReceiptId) {
     throw new Error(`Sales receipt creation did not return a sales_receipt_id: ${JSON.stringify(data)}`);
@@ -608,6 +607,20 @@ export async function createSalesReceipt({
   };
 }
 
+// Same undocumented Zoho quirk as createSalesReceipt() above: the list
+// envelope key has been observed as both `salesreceipts` and
+// `sales_receipts`. Every reader of this endpoint must check both, or a
+// customer's receipts silently disappear (empty array) instead of erroring.
+function extractSalesReceiptList(data) {
+  return data?.salesreceipts || data?.sales_receipts || [];
+}
+
+// Same idea for a single-record envelope (`GET /salesreceipts/{id}`):
+// accept `salesreceipt`, `sales_receipt_details`, or `sales_receipt`.
+function extractSalesReceiptRecord(data) {
+  return data?.salesreceipt || data?.sales_receipt_details || data?.sales_receipt || null;
+}
+
 export async function findSalesReceiptByReference(referenceNumber) {
   if (!referenceNumber) return null;
   const qs = new URLSearchParams({
@@ -615,13 +628,13 @@ export async function findSalesReceiptByReference(referenceNumber) {
     per_page: '10',
   });
   const data = await zohoRequest('get', `/salesreceipts?${qs.toString()}`);
-  const receipts = data?.salesreceipts || [];
+  const receipts = extractSalesReceiptList(data);
   return receipts.find((r) => r.reference_number === referenceNumber) || null;
 }
 
 export async function verifySalesReceiptExists(salesReceiptId) {
   const data = await zohoRequest('get', `/salesreceipts/${salesReceiptId}`);
-  return Boolean(data.salesreceipt?.sales_receipt_id);
+  return Boolean(extractSalesReceiptRecord(data)?.sales_receipt_id);
 }
 
 export async function sendSalesReceiptEmail(
