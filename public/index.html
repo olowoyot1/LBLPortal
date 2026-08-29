@@ -454,6 +454,15 @@ a{color:var(--gold);text-decoration:none}
         </div>
         <div id="search-results" class="result-list"></div>
       </div>
+      <div class="card hidden" id="selected-customer-actions" style="border:1px solid var(--gold-border);background:var(--gold-dim)">
+        <div class="card-title">Customer Selected</div>
+        <div id="selected-customer-name" style="font-weight:700;font-size:15px;margin-bottom:4px"></div>
+        <div id="selected-customer-meta" style="font-size:11px;color:var(--muted);margin-bottom:12px"></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <button class="btn-outline" id="history-btn" onclick="openHistoryForSelectedCustomer()">↻ Update Payment History</button>
+          <button class="btn-next" id="statement-btn" onclick="generateCustomerStatement()">▤ Generate Customer Statement</button>
+        </div>
+      </div>
       <div class="card hidden" id="new-cust-form">
         <div class="card-title">New Customer Details</div>
         <div class="form-row"><label>Full Name *</label><input type="text" id="new-name" placeholder="e.g. Abiola Samson Ashimiyu" required/></div>
@@ -465,11 +474,7 @@ a{color:var(--gold);text-decoration:none}
         <div style="font-size:11px;color:var(--muted);margin-top:4px">All fields are required — email and phone are needed to send the customer their receipt, invoice, or sales order.</div>
       </div>
       <div class="action-bar">
-        <div style="display:flex;gap:8px;margin-top:0">
-          <button class="btn-outline" id="history-btn" onclick="openHistoryForSelectedCustomer()" disabled style="flex:1">↻ Update Payment History</button>
-          <button class="btn-outline" id="statement-btn" onclick="generateCustomerStatement()" disabled style="flex:1">▤ Generate Customer Statement</button>
-        </div>
-        <button class="btn-next" id="next1" onclick="goStep2()" disabled>Continue →</button>
+        <button class="btn-next" id="next1" onclick="goStep2()" disabled style="width:100%">Continue →</button>
       </div>
     </div>
 

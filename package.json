@@ -1,6 +1,6 @@
 {
   "name": "landblaze-payment-portal",
-  "version": "2.3.2",
+  "version": "2.3.3",
   "description": "Landblaze Limited payment portal \u2014 Vercel deployment",
   "private": true,
   "type": "module",

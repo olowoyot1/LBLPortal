@@ -113,9 +113,9 @@ function setCustType(t) {
   el('btn-existing').classList.toggle('active', t === 'existing');
   el('btn-new').classList.toggle('active', t === 'new');
   if (t === 'existing') {
-    show('existing-search'); hide('new-cust-form'); el('next1').disabled = !S.customer; if (el('history-btn')) el('history-btn').disabled = !S.customer; if (el('statement-btn')) el('statement-btn').disabled = !S.customer;
+    show('existing-search'); hide('new-cust-form'); hide('selected-customer-actions'); el('next1').disabled = !S.customer;
   } else {
-    hide('existing-search'); show('new-cust-form'); el('next1').disabled = false; if (el('history-btn')) el('history-btn').disabled = false; if (el('statement-btn')) el('statement-btn').disabled = true; S.customer = null;
+    hide('existing-search'); show('new-cust-form'); hide('selected-customer-actions'); el('next1').disabled = false; S.customer = null;
   }
 }
 
@@ -159,8 +159,9 @@ function selectCustomer(c) {
   document.querySelectorAll('#existing-search .result-item').forEach((x) => x.classList.remove('selected'));
   const t = el('cr-' + c.customer_id); if (t) t.classList.add('selected');
   el('next1').disabled = false;
-  if (el('history-btn')) el('history-btn').disabled = false;
-  if (el('statement-btn')) el('statement-btn').disabled = false;
+  if (el('selected-customer-actions')) show('selected-customer-actions');
+  if (el('selected-customer-name')) el('selected-customer-name').textContent = c.customer_name || 'Selected Customer';
+  if (el('selected-customer-meta')) el('selected-customer-meta').textContent = `${c.contact_number ? c.contact_number + ' · ' : ''}${c.email || 'No email'}${c.phone ? ' · ' + c.phone : ''}`;
 }
 
 // ── HISTORICAL PAYMENT BACKFILL ──
