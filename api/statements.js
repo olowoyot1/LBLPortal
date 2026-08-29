@@ -49,7 +49,6 @@ function buildPdf({ customer, orders, receipts, transactions }) {
 
     const rows = [];
     let totalReceipts = 0;
-    let receiptsAppliedToOrders = 0;
     let totalOrderValue = orders.reduce((s, o) => s + Number(o.total || 0), 0);
 
     for (const o of orders) {
@@ -70,7 +69,6 @@ function buildPdf({ customer, orders, receipts, transactions }) {
         const li = (r.line_items || []).find((x) => x.name && orderItemNames.has(x.name.trim().toLowerCase()) && orderItemNames.get(x.name.trim().toLowerCase()).length === 1);
         linkedOrder = li ? orderItemNames.get(li.name.trim().toLowerCase())[0] : null;
       }
-      if (linkedOrder) receiptsAppliedToOrders += amount;
       rows.push({
         date: r.date,
         type: 'Sales Receipt',
@@ -83,8 +81,8 @@ function buildPdf({ customer, orders, receipts, transactions }) {
     }
 
     rows.sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.type === 'Sales Order' ? -1 : 1));
-    const outstanding = Math.max(0, totalOrderValue - receiptsAppliedToOrders);
-    let runningContractBalance = 0;
+    const outstanding = totalOrderValue - totalReceipts;
+    let runningBalance = 0;
 
     // --- Header --------------------------------------------------------
     doc.fontSize(17).font('Helvetica-Bold').text('CUSTOMER STATEMENT');
@@ -110,7 +108,7 @@ function buildPdf({ customer, orders, receipts, transactions }) {
 
     // One-line explanation instead of a full paragraph of statement logic.
     doc.fontSize(8).font('Helvetica-Oblique').fillColor('#777777')
-      .text('Outstanding balance only reduces when a receipt is linked to a Sales Order; unlinked receipts still appear below.');
+      .text('Balance is the running total of Debit minus Credit after each entry.');
     doc.fillColor('#111111').moveDown(0.7);
 
     // --- Ledger ----------------------------------------------------------
@@ -137,11 +135,7 @@ function buildPdf({ customer, orders, receipts, transactions }) {
       if (doc.y + h > 770) { doc.addPage(); header(); }
       const y = doc.y;
 
-      if (r.type === 'Sales Order') {
-        runningContractBalance += Number(r.debit || 0);
-      } else if (r.type === 'Sales Receipt' && r.linkedOrder) {
-        runningContractBalance = Math.max(0, runningContractBalance - Number(r.credit || 0));
-      }
+      runningBalance += Number(r.debit || 0) - Number(r.credit || 0);
 
       doc.fontSize(8).fillColor('#222222');
       doc.text(safeDate(r.date), x[0] + 4, y + 6, { width: widths[0] - 8 });
@@ -149,7 +143,7 @@ function buildPdf({ customer, orders, receipts, transactions }) {
       doc.text(r.ref || '—', x[2] + 4, y + 6, { width: widths[2] - 8 });
       doc.text(r.debit ? money(r.debit) : '—', x[3] + 4, y + 6, { width: widths[3] - 8, align: 'right' });
       doc.text(r.credit ? money(r.credit) : '—', x[4] + 4, y + 6, { width: widths[4] - 8, align: 'right' });
-      doc.font('Helvetica-Bold').text(money(runningContractBalance), x[5] + 4, y + 6, { width: widths[5] - 8, align: 'right' });
+      doc.font('Helvetica-Bold').text(money(runningBalance), x[5] + 4, y + 6, { width: widths[5] - 8, align: 'right' });
       doc.font('Helvetica');
       if (note) doc.fontSize(7).fillColor('#888888').text(note, x[2] + 4, y + 17, { width: widths[2] - 8 });
       doc.fillColor('#222222');
