@@ -53,7 +53,7 @@ function buildPdf({ customer, orders, receipts, transactions }) {
     let totalOrderValue = orders.reduce((s, o) => s + Number(o.total || 0), 0);
 
     for (const o of orders) {
-      rows.push({ date: o.date, type: 'Sales Order', ref: o.salesorder_number, description: o.subject || o.line_items?.map((x) => x.name).filter(Boolean).join(', ') || 'Property / contract', debit: Number(o.total || 0), credit: 0 });
+      rows.push({ date: o.date, type: 'Sales Order', ref: o.salesorder_number, debit: Number(o.total || 0), credit: 0 });
     }
 
     for (const r of receipts) {
@@ -75,70 +75,66 @@ function buildPdf({ customer, orders, receipts, transactions }) {
         date: r.date,
         type: 'Sales Receipt',
         ref: r.receipt_number,
-        description: r.line_items?.map((x) => x.name).filter(Boolean).join(', ') || (linkedOrder?.subject || 'Payment received'),
         debit: 0,
         credit: amount,
-        payment: `${r.payment_mode_name || ''}${r.deposit_to_account_name ? ` · ${r.deposit_to_account_name}` : ''}`.replace(/^ · | · $/g, ''),
+        payment: r.payment_mode_name || '',
         linkedOrder: linkedOrder?.salesorder_number || local?.soNumber || '',
       });
     }
 
     rows.sort((a, b) => String(a.date).localeCompare(String(b.date)) || (a.type === 'Sales Order' ? -1 : 1));
+    const outstanding = Math.max(0, totalOrderValue - receiptsAppliedToOrders);
     let runningContractBalance = 0;
 
-    // Header
-    doc.fontSize(18).font('Helvetica-Bold').text('CUSTOMER STATEMENT');
-    doc.moveDown(0.35);
-    doc.fontSize(10).font('Helvetica').fillColor('#666666').text('Landblaze Payment Portal · Statement based on Sales Orders and Sales Receipts');
-    doc.fillColor('#111111');
-    doc.moveDown(1);
+    // --- Header --------------------------------------------------------
+    doc.fontSize(17).font('Helvetica-Bold').text('CUSTOMER STATEMENT');
+    doc.fontSize(9).font('Helvetica').fillColor('#666666').text('Landblaze Payment Portal');
+    doc.fillColor('#111111').moveDown(0.8);
     doc.fontSize(11).font('Helvetica-Bold').text(customer.customer_name || 'Customer');
     doc.fontSize(9).font('Helvetica').fillColor('#555555')
-      .text(`Customer ID: ${customer.customer_id || '—'}`)
-      .text(`Email: ${customer.email || '—'}`)
+      .text(`Customer ID: ${customer.customer_id || '—'}  ·  Email: ${customer.email || '—'}`)
       .text(`Generated: ${new Date().toLocaleString('en-NG')}`);
-    doc.fillColor('#111111');
-    doc.moveDown(1);
+    doc.fillColor('#111111').moveDown(0.9);
 
+    // --- Summary (single source of truth for the three headline figures) ---
     const boxY = doc.y;
-    doc.roundedRect(42, boxY, 511, 66, 6).stroke('#dddddd');
-    doc.fontSize(8).fillColor('#666666').text('SALES ORDER VALUE', 56, boxY + 12);
-    doc.fontSize(13).font('Helvetica-Bold').fillColor('#111111').text(money(totalOrderValue), 56, boxY + 27);
-    doc.fontSize(8).font('Helvetica').fillColor('#666666').text('SALES RECEIPTS', 245, boxY + 12);
-    doc.fontSize(13).font('Helvetica-Bold').fillColor('#111111').text(money(totalReceipts), 245, boxY + 27);
-    doc.fontSize(8).font('Helvetica').fillColor('#666666').text('NET OUTSTANDING', 420, boxY + 12);
-    doc.fontSize(13).font('Helvetica-Bold').fillColor('#111111').text(money(Math.max(0, totalOrderValue - receiptsAppliedToOrders)), 420, boxY + 27);
-    doc.y = boxY + 82;
+    doc.roundedRect(42, boxY, 511, 60, 6).stroke('#dddddd');
+    const col = (label, value, xPos) => {
+      doc.fontSize(8).font('Helvetica').fillColor('#666666').text(label, xPos, boxY + 11);
+      doc.fontSize(13).font('Helvetica-Bold').fillColor('#111111').text(value, xPos, boxY + 25);
+    };
+    col('SALES ORDER VALUE', money(totalOrderValue), 56);
+    col('SALES RECEIPTS', money(totalReceipts), 245);
+    col('OUTSTANDING BALANCE', money(outstanding), 420);
+    doc.y = boxY + 72;
 
-    // Explanation
-    doc.fontSize(8.5).font('Helvetica').fillColor('#555555')
-      .text('Statement logic: Sales Orders represent the contracted/property value. Sales Receipts represent amounts actually received and posted to income. Only receipts linked to a Sales Order are applied against its outstanding contract balance; outright/unallocated receipts remain visible but do not reduce a separate Sales Order balance.');
-    doc.fillColor('#111111').moveDown(0.8);
+    // One-line explanation instead of a full paragraph of statement logic.
+    doc.fontSize(8).font('Helvetica-Oblique').fillColor('#777777')
+      .text('Outstanding balance only reduces when a receipt is linked to a Sales Order; unlinked receipts still appear below.');
+    doc.fillColor('#111111').moveDown(0.7);
 
-    // Statement ledger: show the contract balance after every transaction.
-    // Sales Orders increase the contract balance; only receipts linked to a
-    // Sales Order reduce it. Outright/unallocated receipts remain visible but
-    // do not reduce a contract balance.
-    const x = [42, 100, 175, 335, 405, 480];
-    const widths = [58, 75, 160, 70, 75, 73];
+    // --- Ledger ----------------------------------------------------------
+    const x = [42, 97, 152, 307, 389, 471];
+    const widths = [55, 55, 155, 82, 82, 82];
     const header = () => {
       const y = doc.y;
-      doc.rect(42, y, 511, 22).fill('#eeeeee');
-      doc.fillColor('#333333').font('Helvetica-Bold').fontSize(7.5);
-      ['Date', 'Type', 'Reference / Description', 'Debit', 'Credit', 'Balance Left'].forEach((h, i) => doc.text(h, x[i] + 4, y + 7, { width: widths[i] - 8 }));
+      doc.rect(42, y, 511, 20).fill('#eeeeee');
+      doc.fillColor('#333333').font('Helvetica-Bold').fontSize(8);
+      ['Date', 'Type', 'Reference', 'Debit', 'Credit', 'Balance'].forEach((h, i) => doc.text(h, x[i] + 4, y + 6, { width: widths[i] - 8 }));
       doc.fillColor('#111111').font('Helvetica');
-      doc.y = y + 22;
+      doc.y = y + 20;
     };
     header();
 
     for (const r of rows) {
-      const desc = r.description || '';
-      const link = r.type === 'Sales Receipt'
-        ? [r.payment, r.linkedOrder ? `SO: ${r.linkedOrder}` : 'Unallocated / Outright'].filter(Boolean).join(' · ')
+      // Second line under the reference: a short, relevant note only —
+      // payment method + which order it's linked to (receipts), nothing else.
+      const note = r.type === 'Sales Receipt'
+        ? [r.payment, r.linkedOrder ? `SO ${r.linkedOrder}` : 'Unlinked'].filter(Boolean).join(' · ')
         : '';
-      const detail = `${r.ref || '—'}${desc ? `\n${desc}` : ''}${link ? `\n${link}` : ''}`;
-      const h = Math.max(30, Math.ceil(Math.max(detail.length / 46, 1)) * 10 + 10);
-      if (doc.y + h > 760) { doc.addPage(); header(); }
+      const lineCount = note ? 2 : 1;
+      const h = lineCount === 2 ? 30 : 20;
+      if (doc.y + h > 770) { doc.addPage(); header(); }
       const y = doc.y;
 
       if (r.type === 'Sales Order') {
@@ -147,26 +143,25 @@ function buildPdf({ customer, orders, receipts, transactions }) {
         runningContractBalance = Math.max(0, runningContractBalance - Number(r.credit || 0));
       }
 
-      doc.fontSize(7.5).fillColor('#222222');
-      doc.text(safeDate(r.date), x[0] + 4, y + 7, { width: widths[0] - 8 });
-      doc.text(r.type, x[1] + 4, y + 7, { width: widths[1] - 8 });
-      doc.text(`${r.ref || '—'}${desc ? `\n${desc}` : ''}`, x[2] + 4, y + 5, { width: widths[2] - 8 });
-      doc.text(r.debit ? money(r.debit) : '—', x[3] + 4, y + 7, { width: widths[3] - 8, align: 'right' });
-      doc.text(r.credit ? money(r.credit) : '—', x[4] + 4, y + 7, { width: widths[4] - 8, align: 'right' });
-      doc.font('Helvetica-Bold').text(money(runningContractBalance), x[5] + 4, y + 7, { width: widths[5] - 8, align: 'right' });
+      doc.fontSize(8).fillColor('#222222');
+      doc.text(safeDate(r.date), x[0] + 4, y + 6, { width: widths[0] - 8 });
+      doc.text(r.type.replace('Sales ', ''), x[1] + 4, y + 6, { width: widths[1] - 8 });
+      doc.text(r.ref || '—', x[2] + 4, y + 6, { width: widths[2] - 8 });
+      doc.text(r.debit ? money(r.debit) : '—', x[3] + 4, y + 6, { width: widths[3] - 8, align: 'right' });
+      doc.text(r.credit ? money(r.credit) : '—', x[4] + 4, y + 6, { width: widths[4] - 8, align: 'right' });
+      doc.font('Helvetica-Bold').text(money(runningContractBalance), x[5] + 4, y + 6, { width: widths[5] - 8, align: 'right' });
       doc.font('Helvetica');
-      if (link) doc.fontSize(6.8).fillColor('#666666').text(link, x[2] + 4, y + h - 11, { width: widths[2] - 8 });
+      if (note) doc.fontSize(7).fillColor('#888888').text(note, x[2] + 4, y + 17, { width: widths[2] - 8 });
       doc.fillColor('#222222');
       doc.moveTo(42, y + h).lineTo(553, y + h).stroke('#eeeeee');
       doc.y = y + h;
     }
 
+    // Footer: provenance note only — totals are already shown once, in the
+    // summary box above, so we don't repeat them here.
     doc.moveDown(0.8);
-    doc.font('Helvetica-Bold').fontSize(10).text(`Contracted Sales Order Value: ${money(totalOrderValue)}`);
-    doc.text(`Total Sales Receipts: ${money(totalReceipts)}`);
-    doc.text(`Outstanding Sales Order Value: ${money(Math.max(0, totalOrderValue - receiptsAppliedToOrders))}`);
-    doc.font('Helvetica').fontSize(8).fillColor('#666666').moveDown(0.5)
-      .text('This statement was generated by the Landblaze Payment Portal from live Zoho Books Sales Order and Sales Receipt records.');
+    doc.fontSize(7.5).font('Helvetica').fillColor('#999999')
+      .text('Generated by the Landblaze Payment Portal from Zoho Books Sales Order and Sales Receipt records.');
 
     doc.end();
   });
