@@ -18,7 +18,7 @@ function assertConfigured() {
   }
 }
 
-async function getAccessToken() {
+export async function getZohoAccessToken() {
   assertConfigured();
   const cached = await getZohoToken();
   const now = Date.now();
@@ -46,7 +46,7 @@ async function getAccessToken() {
 }
 
 async function zohoRequest(method, endpoint, { params = {}, data = null } = {}) {
-  const token = await getAccessToken();
+  const token = await getZohoAccessToken();
   try {
     const resp = await axios({
       method,
@@ -69,7 +69,7 @@ async function zohoRequest(method, endpoint, { params = {}, data = null } = {}) 
 // contract PDF) where the body must be sent as multipart/form-data instead
 // of JSON.
 async function zohoUpload(endpoint, formData, { params = {} } = {}) {
-  const token = await getAccessToken();
+  const token = await getZohoAccessToken();
   try {
     const resp = await axios({
       method: 'post',
@@ -737,4 +737,19 @@ export async function verifyInvoiceExists(invoiceId) {
 export async function verifySalesOrderExists(salesorderId) {
   const data = await zohoRequest('get', `/salesorders/${salesorderId}`);
   return Boolean(data.salesorder?.salesorder_id);
+}
+
+
+// ── Expenses (Zoho Books reconciliation) ──
+
+export async function searchBooksExpensesByReference(reference) {
+  const data = await zohoRequest('get', '/expenses', {
+    params: { reference_number_contains: reference, per_page: 200 },
+  });
+  return (data.expenses || []).filter((e) => String(e.reference_number || '').trim() === String(reference).trim());
+}
+
+export async function getBooksExpense(expenseId) {
+  const data = await zohoRequest('get', `/expenses/${expenseId}`);
+  return data.expense || null;
 }

@@ -85,11 +85,12 @@ let S = { custType: null, txType: null, customer: null, salesOrder: null, newCus
 
 // ── tabs ──
 function switchTab(t) {
-  ['payment', 'log', 'staff', 'subscription'].forEach((x) => {
+  ['payment', 'log', 'expenses', 'staff', 'subscription'].forEach((x) => {
     el('tab-' + x)?.classList.toggle('active', x === t);
     el('view-' + x)?.classList.toggle('active', x === t);
   });
   if (t === 'log') renderLog();
+  if (t === 'expenses') renderExpenses();
   if (t === 'staff') renderStaff();
   if (t === 'subscription') renderSubscription();
 }
@@ -1229,6 +1230,150 @@ async function submitBulkUpload() {
     el('bulk-error').classList.remove('hidden');
   }
   btn.disabled = false; btn.textContent = 'Upload & Create';
+}
+
+
+// ── EXPENSE POSTING ──
+let expenseCache = [];
+let expenseCategories = [];
+let expenseCurrencies = [];
+
+function expenseStatusClass(status) {
+  if (['synced_to_books','zoho_expense_approved'].includes(status)) return 'good';
+  if (['zoho_expense_failed','zoho_expense_rejected','books_sync_check_failed'].includes(status)) return 'bad';
+  return 'warn';
+}
+
+function expenseStatusLabel(status) {
+  return String(status || 'unknown').replaceAll('_', ' ');
+}
+
+async function loadExpenseLookups() {
+  const [cats, curs] = await Promise.all([
+    api('/api/expenses?action=categories'),
+    api('/api/expenses?action=currencies'),
+  ]);
+  expenseCategories = cats.categories || [];
+  expenseCurrencies = curs.currencies || [];
+  const catEl = el('ex-category');
+  catEl.innerHTML = '<option value="">Select category</option>' + expenseCategories.map(c =>
+    `<option value="${escapeHtml(c.category_id)}">${escapeHtml(c.category_name)}${c.gl_code ? ' · ' + escapeHtml(c.gl_code) : ''}</option>`
+  ).join('');
+  const curEl = el('ex-currency');
+  const preferred = expenseCurrencies.find(c => c.currency_code === 'NGN') || expenseCurrencies.find(c => c.is_base_currency) || expenseCurrencies[0];
+  curEl.innerHTML = '<option value="">Select currency</option>' + expenseCurrencies.map(c =>
+    `<option value="${escapeHtml(c.currency_id)}" ${preferred && c.currency_id === preferred.currency_id ? 'selected' : ''}>${escapeHtml(c.currency_code)} — ${escapeHtml(c.currency_name || '')}</option>`
+  ).join('');
+}
+
+function showExpenseForm() {
+  el('expense-form-card').classList.remove('hidden');
+  el('ex-date').value = new Date().toISOString().slice(0, 10);
+  el('expense-form-error').classList.add('hidden');
+  loadExpenseLookups().catch(e => {
+    el('expense-form-error').textContent = e.message;
+    el('expense-form-error').classList.remove('hidden');
+  });
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function hideExpenseForm() { el('expense-form-card').classList.add('hidden'); }
+
+async function submitExpense() {
+  const btn = el('expense-submit');
+  const error = el('expense-form-error');
+  error.classList.add('hidden');
+  const categoryId = el('ex-category').value;
+  const currencyId = el('ex-currency').value;
+  const category = expenseCategories.find(c => c.category_id === categoryId);
+  const currency = expenseCurrencies.find(c => c.currency_id === currencyId);
+  const body = {
+    date: el('ex-date').value,
+    amount: Number(el('ex-amount').value),
+    categoryId,
+    categoryName: category?.category_name || '',
+    currencyId,
+    currencyCode: currency?.currency_code || '',
+    merchantName: el('ex-merchant').value.trim(),
+    paymentMode: el('ex-payment-mode').value,
+    description: el('ex-description').value.trim(),
+    customerId: el('ex-customer').value.trim(),
+    projectId: el('ex-project').value.trim(),
+    isReimbursable: el('ex-reimbursable').checked,
+    isBillable: el('ex-billable').checked,
+  };
+  if (!body.date || !body.amount || !body.categoryId || !body.currencyId || !body.description) {
+    error.textContent = 'Please complete the required fields.'; error.classList.remove('hidden'); return;
+  }
+  btn.disabled = true; btn.textContent = 'Posting to Zoho Expense...';
+  try {
+    const result = await api('/api/expenses', { method: 'POST', body: JSON.stringify(body) });
+    hideExpenseForm();
+    await renderExpenses();
+    alert(`Expense ${result.expense.reference} was submitted to Zoho Expense and its report was sent for approval.`);
+  } catch (e) {
+    error.textContent = e.message; error.classList.remove('hidden');
+  }
+  btn.disabled = false; btn.textContent = 'Submit Expense';
+}
+
+async function refreshExpenses() {
+  try {
+    const result = await api('/api/expenses?action=sync');
+    expenseCache = result.expenses || [];
+    renderExpenseTable();
+  } catch (e) { alert(e.message); }
+}
+
+async function renderExpenses() {
+  el('expense-body').innerHTML = '<div class="log-empty"><span class="spinner"></span> Loading expenses...</div>';
+  try {
+    const data = await api('/api/expenses');
+    expenseCache = data.expenses || [];
+    renderExpenseTable();
+  } catch (e) {
+    el('expense-body').innerHTML = `<div class="log-empty" style="color:var(--red)">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function renderExpenseTable() {
+  const list = [...expenseCache].sort((a,b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  const stats = {
+    total: list.length,
+    pending: list.filter(e => ['submitted_to_zoho_expense','awaiting_books_sync','books_sync_check_failed'].includes(e.status)).length,
+    approved: list.filter(e => e.zohoExpenseStatus === 'approved' || e.status === 'zoho_expense_approved').length,
+    books: list.filter(e => e.status === 'synced_to_books').length,
+  };
+  el('expense-stats').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Total expenses</div><div class="stat-value">${stats.total}</div></div>
+    <div class="stat-card"><div class="stat-label">Pending</div><div class="stat-value">${stats.pending}</div></div>
+    <div class="stat-card"><div class="stat-label">Approved</div><div class="stat-value">${stats.approved}</div></div>
+    <div class="stat-card"><div class="stat-label">Posted to Books</div><div class="stat-value">${stats.books}</div></div>`;
+  if (!list.length) {
+    el('expense-body').innerHTML = '<div class="log-empty">No expenses yet. Click “+ New Expense” to post one.</div>';
+    return;
+  }
+  el('expense-body').innerHTML = `<div class="expense-table-wrap"><table class="expense-table"><thead><tr><th>Reference</th><th>Date</th><th>Employee</th><th>Category</th><th>Amount</th><th>Zoho Expense</th><th>Zoho Books</th><th>Portal Status</th><th></th></tr></thead><tbody>
+    ${list.map(e => `<tr>
+      <td><div class="expense-ref">${escapeHtml(e.reference)}</div><div style="font-size:10px;color:var(--muted);margin-top:3px">${escapeHtml(e.merchantName || e.description || '')}</div></td>
+      <td>${escapeHtml(e.expenseDate || '')}</td>
+      <td>${escapeHtml(e.employeeName || e.username || '')}</td>
+      <td>${escapeHtml(e.categoryName || '')}</td>
+      <td>${escapeHtml(e.currencyCode || '')} ${Number(e.amount || 0).toLocaleString()}</td>
+      <td><div>${escapeHtml(e.zohoExpenseId || '—')}</div><span class="expense-status ${expenseStatusClass(e.zohoExpenseStatus)}">${escapeHtml(e.zohoExpenseStatus || 'pending')}</span></td>
+      <td>${e.booksExpenseId ? `<div>${escapeHtml(e.booksExpenseId)}</div><span class="expense-status good">posted</span>` : '<span style="color:var(--muted)">Pending</span>'}</td>
+      <td><span class="expense-status ${expenseStatusClass(e.status)}">${escapeHtml(expenseStatusLabel(e.status))}</span>${e.lastSyncError ? `<div style="color:var(--red);font-size:9px;margin-top:5px">${escapeHtml(e.lastSyncError)}</div>` : ''}</td>
+      <td><button class="log-btn" onclick="refreshOneExpense('${escapeHtml(e.id)}')">↻</button></td>
+    </tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+async function refreshOneExpense(id) {
+  try {
+    const data = await api(`/api/expenses?id=${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({}) });
+    const idx = expenseCache.findIndex(e => e.id === id); if (idx >= 0) expenseCache[idx] = data.expense;
+    renderExpenseTable();
+  } catch (e) { alert(e.message); }
 }
 
 // ── subscription (admin only) ──

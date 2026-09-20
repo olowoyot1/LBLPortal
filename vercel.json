@@ -90,5 +90,11 @@
         }
       ]
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/expenses?action=sync",
+      "schedule": "*/10 * * * *"
+    }
   ]
 }

@@ -5,6 +5,7 @@
 //   sessions        → JSON array of session objects
 //   transactions    → JSON array of transaction log entries
 //   zoho_token      → JSON { accessToken, expiresAt }
+//   expenses        → JSON array of portal expense records
 
 import { kv } from '@vercel/kv';
 
@@ -45,4 +46,17 @@ export async function saveZohoToken(token) {
 // on the same number even under simultaneous requests.
 export async function nextContractSequence() {
   return kv.incr('contract_code_seq');
+}
+
+
+export async function getExpenses() {
+  return (await kv.get('expenses')) ?? [];
+}
+
+export async function saveExpenses(expenses) {
+  await kv.set('expenses', expenses);
+}
+
+export async function nextExpenseSequence() {
+  return kv.incr('expense_reference_seq');
 }
