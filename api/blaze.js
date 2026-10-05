@@ -5,7 +5,9 @@ import { requireAuth } from './_lib/auth.js';
 import { handleCors } from './_lib/cors.js';
 
 function baseUrl() {
-  return String(process.env.BLAZE_ENGINE_URL || 'https://blazeengine.vercel.app').replace(/\/$/, '');
+  const value = String(process.env.BLAZE_ENGINE_URL || '').trim().replace(/\/$/, '');
+  if (!value) throw new Error('BLAZE_ENGINE_URL is not configured in this Vercel project');
+  return value;
 }
 
 function configured() {
@@ -38,7 +40,7 @@ export default async function handler(req, res) {
       if (!['accountant', 'finance_operations', 'sales_manager', 'manager', 'admin'].includes(String(session.role).toLowerCase())) {
         return res.status(403).json({ error: 'Your LBL Portal role cannot access Blaze Engine sales workflow.' });
       }
-      const status = String(req.query.status || 'PAYMENT_PROOF_SUBMITTED,INVOICE_ENTERED,SALES_APPROVED');
+      const status = String(req.query.status || 'PAYMENT_PROOF_SUBMITTED,INVOICE_ENTERED,SALES_APPROVED,CONTRACT_PREPARED');
       const data = await callBlaze(`/api/integrations/lbl?status=${encodeURIComponent(status)}`);
       return res.json(data);
     }
