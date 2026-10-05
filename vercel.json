@@ -21,8 +21,5 @@
     {"source":"/","headers":[{"key":"Cache-Control","value":"no-store, max-age=0"}]},
     {"source":"/app.js","headers":[{"key":"Cache-Control","value":"no-store, max-age=0"}]},
     {"source":"/config.js","headers":[{"key":"Cache-Control","value":"no-store, max-age=0"}]}
-  ],
-  "crons": [
-    {"path":"/api/expenses?action=sync","schedule":"0 0 * * *"}
   ]
 }
