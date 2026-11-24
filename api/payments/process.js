@@ -146,6 +146,7 @@ export default async function handler(req, res) {
         accountId: bankAccount?.account_id,
         date: payDate,
         itemId: item?.item_id,
+        incomeAccountId: item?.account_id,
         lineItemName: itemLabel,
         notes: notesText,
       });
@@ -222,6 +223,7 @@ export default async function handler(req, res) {
         accountId: bankAccount?.account_id,
         date: payDate,
         itemId: item?.item_id,
+        incomeAccountId: item?.account_id,
         lineItemName: itemLabel,
         notes: `Installment payment against ${so.salesorder_number}. ${description}`,
         referenceNumber: so.salesorder_number,
@@ -309,6 +311,7 @@ export default async function handler(req, res) {
         accountId: bankAccount?.account_id,
         date: payDate,
         itemId: item?.item_id,
+        incomeAccountId: item?.account_id,
         lineItemName: itemLabel,
         notes: `Installment payment against ${salesOrder.salesorder_number}. ${description}`,
         referenceNumber: salesOrder.salesorder_number,

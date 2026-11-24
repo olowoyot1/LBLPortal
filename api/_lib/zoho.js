@@ -107,6 +107,7 @@ export async function searchItems(name) {
       item_id: i.item_id,
       name: i.name,
       rate: i.rate,
+      account_id: i.account_id || '',
       description: i.description || '',
       unit: i.unit || '',
     }));
@@ -572,12 +573,18 @@ export async function createSalesReceipt({
   accountId,
   date,
   itemId,
+  incomeAccountId,
   lineItemName,
   notes,
   referenceNumber,
 }) {
   const lineItem = itemId
-    ? { item_id: itemId, rate: Number(amount), quantity: 1 }
+    ? {
+        item_id: itemId,
+        rate: Number(amount),
+        quantity: 1,
+        ...(incomeAccountId ? { account_id: incomeAccountId } : {}),
+      }
     : { name: lineItemName, rate: Number(amount), quantity: 1 };
 
   const payload = {
